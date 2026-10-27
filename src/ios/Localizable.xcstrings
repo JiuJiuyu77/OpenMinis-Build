@@ -19895,6 +19895,22 @@
         }
       }
     },
+    "A truncated binary (e.g. a few dozen bytes) cannot be repaired inside the iSH sandbox — it is an isolated chroot. Deleting it here and reinstalling from the list above is the only fix.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "截断的二进制（例如只有几十字节）无法在 iSH 沙箱里修复——沙箱是独立 chroot。只能在这里删除后从上面的列表重装。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "截斷的二進制（例如只有幾十字節）無法在 iSH 沙箱裏修復——沙箱是獨立 chroot。只能在這裏刪除後從上面的列表重裝。"
+          }
+        }
+      }
+    },
     "A voice service is configured more than once. Voice is merged into a single row here; you can delete the extra provider above if you want.": {
       "comment": "Duplicate voice provider hint",
       "localizations": {
@@ -30994,6 +31010,22 @@
         }
       }
     },
+    "Also scan other apps' runtime folders (MT-Agent / CodexApp). Off by default: those copies cannot be loaded in a sandboxed build.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同时扫描其它 App 的运行时目录（MT-Agent / CodexApp）。默认关闭：沙箱构建里这些副本无法加载。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同時掃描其它 App 的運行時目錄（MT-Agent / CodexApp）。默認關閉：沙箱構建裏這些副本無法加載。"
+          }
+        }
+      }
+    },
     "Alternative Protocol": {
       "extractionState": "stale",
       "localizations": {
@@ -33505,6 +33537,22 @@
         }
       }
     },
+    "App container is not available.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "App 容器不可用。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "App 容器不可用。"
+          }
+        }
+      }
+    },
     "App font size": {
       "extractionState": "manual",
       "localizations": {
@@ -34148,6 +34196,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "套用並重新偵測"
+          }
+        }
+      }
+    },
+    "Apply manifest URL": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "应用清单地址"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "應用清單地址"
           }
         }
       }
@@ -64081,6 +64145,22 @@
         }
       }
     },
+    "Copied the runtime into the app container: ": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已把运行时复制到 App 容器："
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已把運行時複製到 App 容器："
+          }
+        }
+      }
+    },
     "Copied: %@": {
       "localizations": {
         "de": {
@@ -67258,6 +67338,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "複製為富文字"
+          }
+        }
+      }
+    },
+    "Copy failed: ": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "复制失败："
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "複製失敗："
           }
         }
       }
@@ -119424,6 +119520,22 @@
         }
       }
     },
+    "Jailbreak (rootful · 有根越狱)": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "越狱（有根 · rootful）"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "越獄（有根 · rootful）"
+          }
+        }
+      }
+    },
     "Jailbreak (rootful)": {
       "localizations": {
         "zh-Hans": {
@@ -119436,6 +119548,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "越獄（有根）"
+          }
+        }
+      }
+    },
+    "Jailbreak (rootless · 无根越狱)": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "越狱（无根 · rootless）"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "越獄（無根 · rootless）"
           }
         }
       }
@@ -143842,6 +143970,22 @@
         }
       }
     },
+    "Native execution is working again.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "原生执行已恢复正常。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "原生執行已恢復正常。"
+          }
+        }
+      }
+    },
     "Native runtime": {
       "localizations": {
         "en": {
@@ -144271,6 +144415,54 @@
           "stringUnit": {
             "state": "translated",
             "value": "需要你授權 · 高風險"
+          }
+        }
+      }
+    },
+    "Neither TrollStore nor a jailbreak detected — Automatic stays in the iSH sandbox.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未检测到巨魔或越狱 —— 「自动」会留在 iSH 沙箱。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未檢測到巨魔或越獄 —— 「自動」會留在 iSH 沙箱。"
+          }
+        }
+      }
+    },
+    "Neither TrollStore nor a jailbreak was detected, so the native runtime cannot load its own libraries (libiosexec). Everything is routed to the iSH sandbox.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有检测到巨魔或越狱环境，原生运行时无法加载自己的动态库（libiosexec），所有命令都会走 iSH 沙箱。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沒有檢測到巨魔或越獄環境，原生運行時無法加載自己的動態庫（libiosexec），所有命令都會走 iSH 沙箱。"
+          }
+        }
+      }
+    },
+    "Neither TrollStore nor jailbreak (沙箱)": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "非巨魔 / 未越狱（沙箱）"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "非巨魔 / 未越獄（沙箱）"
           }
         }
       }
@@ -148720,6 +148912,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "沒有已啟用的 OpenAI 實例。"
+          }
+        }
+      }
+    },
+    "No Theos root to import.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有可导入的 Theos 根目录。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沒有可導入的 Theos 根目錄。"
           }
         }
       }
@@ -158847,6 +159055,22 @@
         }
       }
     },
+    "Off — only runtimes installed in this app are used": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭 —— 只使用本 App 内安装的运行时"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "關閉 —— 只使用本 App 內安裝的運行時"
+          }
+        }
+      }
+    },
     "Off: runs use the reasoning level of the Model Group above, or of the conversation that delegated when the model is Auto.": {
       "extractionState": "manual",
       "localizations": {
@@ -160086,6 +160310,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "逾時將：不做決定"
+          }
+        }
+      }
+    },
+    "On — MT-Agent / CodexApp directories are scanned": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开启 —— 会扫描 MT-Agent / CodexApp 目录"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開啓 —— 會掃描 MT-Agent / CodexApp 目錄"
           }
         }
       }
@@ -161338,6 +161578,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "打開工作階段"
+          }
+        }
+      }
+    },
+    "Open Settings → Runtime diagnostics and tap One-tap repair: it copies the runtime into the app container, then switches to the iSH sandbox if native execution is still impossible.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开 设置 → 运行时诊断 点「一键修复」：它会先把运行时复制进 App 容器；仍然无法原生执行时自动切到 iSH 沙箱。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打開 設置 → 運行時診斷 點「一鍵修復」：它會先把運行時複製進 App 容器；仍然無法原生執行時自動切到 iSH 沙箱。"
           }
         }
       }
@@ -174131,6 +174387,22 @@
         }
       }
     },
+    "Probe after import: ": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "导入后探针："
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "導入後探針："
+          }
+        }
+      }
+    },
     "Probe: ": {
       "localizations": {
         "zh-Hans": {
@@ -178803,6 +179075,22 @@
         }
       }
     },
+    "Re-check": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新检测"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新檢測"
+          }
+        }
+      }
+    },
     "Re-import from File…": {
       "extractionState": "stale",
       "localizations": {
@@ -183417,6 +183705,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "重新整理工具"
+          }
+        }
+      }
+    },
+    "Refresh manifest": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刷新清单"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刷新清單"
           }
         }
       }
@@ -196351,6 +196655,22 @@
         }
       }
     },
+    "Reuse external runtime": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "复用外部运行时"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "複用外部運行時"
+          }
+        }
+      }
+    },
     "Reusing this app's existing registration.": {
       "extractionState": "manual",
       "localizations": {
@@ -199802,6 +200122,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "無法加載運行時動態庫（libiosexec）"
+          }
+        }
+      }
+    },
+    "Runtime manifest URL": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "运行时清单地址"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "運行時清單地址"
           }
         }
       }
@@ -237608,6 +237944,38 @@
         }
       }
     },
+    "The runtime directory no longer exists: ": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "运行时目录已不存在："
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "運行時目錄已不存在："
+          }
+        }
+      }
+    },
+    "The runtime is already inside the app container.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "运行时已经在 App 容器内。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "運行時已經在 App 容器內。"
+          }
+        }
+      }
+    },
     "The sandbox kernel is not running yet.": {
       "localizations": {
         "en": {
@@ -252972,6 +253340,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "TrollStore"
+          }
+        }
+      }
+    },
+    "TrollStore (巨魔)": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "巨魔（TrollStore）"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "巨魔（TrollStore）"
+          }
+        }
+      }
+    },
+    "TrollStore and jailbroken installs can run the native toolchain. A sandboxed build cannot load its libraries (libiosexec) — commands then stay in the iSH sandbox, which is expected.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "只有巨魔或越狱安装才能跑设备原生工具链。沙箱构建加载不了运行时自己的动态库（libiosexec），命令会留在 iSH 沙箱内，这是预期行为。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "只有巨魔或越獄安裝才能跑設備原生工具鏈。沙箱構建加載不了運行時自己的動態庫（libiosexec），命令會留在 iSH 沙箱內，這是預期行爲。"
           }
         }
       }
@@ -280370,6 +280770,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "首選變為 %@"
+          }
+        }
+      }
+    },
+    "process is not sandboxed — TrollStore signature": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "进程未被沙箱限制 —— 巨魔签名"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "進程未被沙箱限制 —— 巨魔簽名"
           }
         }
       }

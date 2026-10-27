@@ -156,10 +156,34 @@ struct RuntimeManifest: Codable {
 
 enum RuntimeManifestLoader {
 
-    /// Upstream manifest. Kept as a constant so the settings page can also
-    /// refresh from it without a build-time configuration value.
+    /// 运行时清单地址：默认指向本项目的运行时仓库（JiuJiuyu77/CodexApp-Runtime）。
+    /// 设置 → 运行时诊断 里可以覆盖成任意镜像/自建仓库，不必重新编译。
     static let defaultURL = URL(string:
-        "https://raw.githubusercontent.com/susu123oss/CodexApp-Runtime/main/Runtime/runtime-manifest.json")!
+        "https://raw.githubusercontent.com/JiuJiuyu77/CodexApp-Runtime/main/Runtime/runtime-manifest.json")!
+
+    /// 用户自定义清单地址（设置 → 运行时诊断 → 运行时清单地址）。
+    static let overrideURLKey = "developerRuntime.manifestURLOverride"
+
+    /// 实际使用的清单地址：用户覆盖优先，否则用默认仓库。
+    static var manifestURL: URL {
+        let raw = (UserDefaults.standard.string(forKey: overrideURLKey) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !raw.isEmpty, let url = URL(string: raw), url.scheme != nil { return url }
+        return defaultURL
+    }
+
+    static var overrideURLString: String {
+        (UserDefaults.standard.string(forKey: overrideURLKey) ?? "")
+    }
+
+    static func setOverrideURL(_ value: String) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            UserDefaults.standard.removeObject(forKey: overrideURLKey)
+        } else {
+            UserDefaults.standard.set(trimmed, forKey: overrideURLKey)
+        }
+    }
 
     enum LoadError: LocalizedError {
         case badStatus(Int)
@@ -184,7 +208,7 @@ enum RuntimeManifestLoader {
     static func load() async throws -> RuntimeManifest {
         var lastError: Error?
 
-        for attempt in attempts(source: defaultURL, prefixes: mirrorPrefixes) {
+        for attempt in attempts(source: manifestURL, prefixes: mirrorPrefixes) {
             do {
                 let (payload, response) = try await URLSession.shared.data(from: attempt)
                 if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {

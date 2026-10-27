@@ -54,6 +54,15 @@ struct ToolExecutorSettingsView: View {
                     }
                 }
                 .disabled(preference.sandboxMode)
+                Toggle(isOn: $preference.reuseExternalRuntime) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Reuse external runtime")
+                        Text("Also scan other apps' runtime folders (MT-Agent / CodexApp). Off by default: those copies cannot be loaded in a sandboxed build.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .disabled(preference.sandboxMode)
             } header: {
                 Text("Native execution")
             } footer: {
@@ -67,6 +76,10 @@ struct ToolExecutorSettingsView: View {
                 LabeledContent("Effective executor", value: preference.resolvedExecutor.displayName)
                 if preference.sandboxMode {
                     Label("Sandbox mode is on — native execution is disabled.", systemImage: "lock.shield")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else if preference.mode == .auto, preference.resolvedExecutor == .sandbox {
+                    Label("Neither TrollStore nor a jailbreak detected — Automatic stays in the iSH sandbox.", systemImage: "info.circle")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
