@@ -36,8 +36,10 @@ enum NativeBuildTool {
                                         description: "Run `make clean` before packaging. Default false."),
                 "extra": AgentToolParam(type: .string,
                                         description: "Extra make arguments appended verbatim, e.g. 'DEBUG=0'."),
+                "profile": AgentToolParam(type: .string,
+                                          description: "Name of a saved build profile (device UI: 编译工作台 → 编译配置). Its scheme/archs/obfuscation/protection/output become defaults; arguments you pass explicitly still win."),
                 "obfuscation": AgentToolParam(type: .string,
-                                              description: "OLLVM obfuscation strength: off (default), light, balanced, strong, paranoid. Requires the OLLVM runtime to be installed.",
+                                              description: "OLLVM obfuscation strength: off (default), light, balanced, strong, paranoid, extreme. Requires the OLLVM runtime to be installed. extreme adds indirect-branch/indirect-call passes and a much larger binary.",
                                               enumValues: BuildObfuscation.allCases.map(\.rawValue)),
                 "cflags": AgentToolParam(type: .string,
                                          description: "Extra C/ObjC compiler flags appended verbatim."),
@@ -73,6 +75,29 @@ enum NativeBuildTool {
 
     /// 供 AIChatViewModel+ConcurrentTools 的分发分支调用。
     static func perform(args: [String: Any]) async -> (text: String, ok: Bool) {
+        // [T-profile-to-model] 编译配置档也要暴露给模型：profile 只提供**默认值**，
+        // 模型显式传的参数优先级更高。否则用户在界面上配好的混淆/输出，模型每次
+        // 调 native_build 都得重新猜。
+        var args = args
+        if let raw = (args["profile"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !raw.isEmpty {
+            let saved: BuildProfile? = await MainActor.run {
+                BuildProfileStore.shared.profiles.first { $0.name == raw }
+            }
+            if let saved {
+                if args["scheme"] == nil { args["scheme"] = saved.scheme }
+                if args["archs"] == nil { args["archs"] = saved.archs }
+                if args["obfuscation"] == nil { args["obfuscation"] = saved.obfuscation.rawValue }
+                if args["clean"] == nil { args["clean"] = saved.cleanBeforeBuild }
+                if args["incremental"] == nil { args["incremental"] = saved.incremental }
+                if args["jobs"] == nil { args["jobs"] = saved.jobs }
+                if args["extra"] == nil && !saved.extraFlags.isEmpty { args["extra"] = saved.extraFlags }
+                if args["strip_symbols"] == nil { args["strip_symbols"] = saved.stripSymbols }
+                if args["hide_symbols"] == nil { args["hide_symbols"] = saved.hideSymbols }
+                if args["encrypt_strings"] == nil { args["encrypt_strings"] = saved.encryptStrings }
+            }
+        }
+
         var path = (args["path"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
         // [T-native-build-path] 原生工具链在本进程里 spawn 真实的 clang/ld64/make，
