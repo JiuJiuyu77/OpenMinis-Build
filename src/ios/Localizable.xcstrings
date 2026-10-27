@@ -2,6 +2,22 @@
   "sourceLanguage": "en",
   "strings": {
     "": {},
+    " and more": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": " 等"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": " 等"
+          }
+        }
+      }
+    },
     "\"%@\" already has a value. Replace it with \"%@\"?": {
       "extractionState": "stale",
       "localizations": {
@@ -6637,6 +6653,54 @@
           "stringUnit": {
             "state": "translated",
             "value": "%d 條思考規則"
+          }
+        }
+      }
+    },
+    "%ld checks need attention": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%ld 项需要处理"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%ld 項需要處理"
+          }
+        }
+      }
+    },
+    "%ld native commands available": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%ld 个原生命令可用"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%ld 個原生命令可用"
+          }
+        }
+      }
+    },
+    "%ld provider configurations loaded": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已加载 %ld 个提供商配置"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已加載 %ld 個提供商配置"
           }
         }
       }
@@ -29001,6 +29065,22 @@
         }
       }
     },
+    "All checks passed": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全部检查通过"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全部檢查通過"
+          }
+        }
+      }
+    },
     "All groups are already added.": {
       "localizations": {
         "de": {
@@ -42472,6 +42552,22 @@
         }
       }
     },
+    "Basics": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "基础运行"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "基礎運行"
+          }
+        }
+      }
+    },
     "Bearer Token": {
       "localizations": {
         "de": {
@@ -50878,6 +50974,22 @@
         }
       }
     },
+    "Checking core capabilities…": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在检查核心能力…"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在檢查覈心能力…"
+          }
+        }
+      }
+    },
     "Checking…": {
       "localizations": {
         "zh-Hans": {
@@ -57674,6 +57786,22 @@
         }
       }
     },
+    "Code assistance": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "代码辅助能力"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "代碼輔助能力"
+          }
+        }
+      }
+    },
     "Codex versions": {
       "localizations": {
         "zh-Hans": {
@@ -58139,6 +58267,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "命令"
+          }
+        }
+      }
+    },
+    "Command execution": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "命令执行"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "命令執行"
+          }
+        }
+      }
+    },
+    "Command returned normally": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "命令正常返回"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "命令正常返回"
           }
         }
       }
@@ -102113,6 +102273,22 @@
         }
       }
     },
+    "Finished in %lds · %ld passed": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用时 %ld 秒 · %ld 项通过"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用時 %ld 秒 · %ld 項通過"
+          }
+        }
+      }
+    },
     "Finishing…": {
       "extractionState": "manual",
       "localizations": {
@@ -107222,6 +107398,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "獲取 Minis 工作階段的當前狀態，包括 Agent 是否仍在運行、最新訊息和最後的工具調用。"
+          }
+        }
+      }
+    },
+    "Git & common tools": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Git 与常用工具"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Git 與常用工具"
           }
         }
       }
@@ -120998,6 +121190,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "保持智能體在背景運行。通過鎖屏和靈動島的實時活動顯示進度。同時開啟背景語音播報，讓朗讀不會被打斷。"
+          }
+        }
+      }
+    },
+    "Kernel booted": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内核已启动"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "內核已啓動"
           }
         }
       }
@@ -144098,6 +144306,22 @@
         }
       }
     },
+    "Native offload commands (apple-* / minis-*)": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "原生 offload 命令（apple-* / minis-*）"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "原生 offload 命令（apple-* / minis-*）"
+          }
+        }
+      }
+    },
     "Native runtime": {
       "localizations": {
         "en": {
@@ -152866,6 +153090,22 @@
         }
       }
     },
+    "No native offload command was found": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有找到原生 offload 命令"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沒有找到原生 offload 命令"
+          }
+        }
+      }
+    },
     "No native toolchain was found on this device.": {
       "localizations": {
         "en": {
@@ -153309,6 +153549,22 @@
         }
       }
     },
+    "No provider configured yet": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "还没有配置提供商"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "還沒有配置提供商"
+          }
+        }
+      }
+    },
     "No providers configured": {
       "localizations": {
         "de": {
@@ -153634,6 +153890,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "尚無執行紀錄"
+          }
+        }
+      }
+    },
+    "No runtime installed": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未安装运行时"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未安裝運行時"
           }
         }
       }
@@ -160571,6 +160843,22 @@
         }
       }
     },
+    "On-device compiling": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "手机编译"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "手機編譯"
+          }
+        }
+      }
+    },
     "Once, %@ after it was set": {
       "extractionState": "manual",
       "localizations": {
@@ -162077,6 +162365,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "打開終端"
+          }
+        }
+      }
+    },
+    "Open a chat once to boot the sandbox": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开一次对话即可启动沙箱"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打開一次對話即可啓動沙箱"
           }
         }
       }
@@ -163709,6 +164013,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "選填"
+          }
+        }
+      }
+    },
+    "Optional capabilities": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可选能力"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可選能力"
           }
         }
       }
@@ -167039,6 +167359,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "部分提速"
+          }
+        }
+      }
+    },
+    "Passed": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通过"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通過"
           }
         }
       }
@@ -174766,6 +175102,38 @@
         }
       }
     },
+    "Project files": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "项目文件"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "項目文件"
+          }
+        }
+      }
+    },
+    "Project tools": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "项目能力"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "項目能力"
+          }
+        }
+      }
+    },
     "Prompt": {
       "localizations": {
         "de": {
@@ -175362,6 +175730,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "匯入供應商"
+          }
+        }
+      }
+    },
+    "Provider configuration database": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "提供商配置数据库"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "提供商配置數據庫"
           }
         }
       }
@@ -181587,6 +181971,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "可以登录了"
+          }
+        }
+      }
+    },
+    "Realtime tool bridge": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "实时工具通道"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "即時工具通道"
           }
         }
       }
@@ -200093,6 +200493,22 @@
         }
       }
     },
+    "Runs a real command inside the sandbox": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在沙箱里真实执行一条命令"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在沙箱裏真實執行一條命令"
+          }
+        }
+      }
+    },
     "Runs as a sub-task; the result comes back to this chat": {
       "extractionState": "manual",
       "localizations": {
@@ -200250,6 +200666,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "運行時檢測失敗"
+          }
+        }
+      }
+    },
+    "Runtime configuration": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "运行配置"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "運行配置"
           }
         }
       }
@@ -201592,6 +202024,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "沙箱（iSH）"
+          }
+        }
+      }
+    },
+    "Sandbox kernel": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沙箱内核"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沙箱內核"
           }
         }
       }
@@ -236916,6 +237364,22 @@
         }
       }
     },
+    "The iSH kernel is not running": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iSH 内核未运行"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iSH 內核未運行"
+          }
+        }
+      }
+    },
     "The install and the rollback both failed. The previous packages are kept: run “apk add /var/cache/minis-aojit/rollback/*.apk” in the terminal.\n%@": {
       "extractionState": "manual",
       "localizations": {
@@ -238196,6 +238660,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "運行時已經在 App 容器內。"
+          }
+        }
+      }
+    },
+    "The sandbox did not answer": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沙箱没有响应"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沙箱沒有響應"
           }
         }
       }
@@ -239771,6 +240251,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "Theos 根目錄路徑"
+          }
+        }
+      }
+    },
+    "Theos toolchain and native runtime": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Theos 工具链与原生运行时"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Theos 工具鏈與原生運行時"
           }
         }
       }
@@ -252035,6 +252531,22 @@
         }
       }
     },
+    "Toolchain details": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工具链逐项"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工具鏈逐項"
+          }
+        }
+      }
+    },
     "Toolchain diagnostics": {
       "localizations": {
         "en": {
@@ -253612,6 +254124,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "只有巨魔或越獄安裝才能跑設備原生工具鏈。沙箱構建加載不了運行時自己的動態庫（libiosexec），命令會留在 iSH 沙箱內，這是預期行爲。"
+          }
+        }
+      }
+    },
+    "TrollStore or jailbreak": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "巨魔或越狱"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "巨魔或越獄"
           }
         }
       }
@@ -264685,6 +265213,22 @@
         }
       }
     },
+    "Verifying %@%@ · %lds elapsed": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在逐项确认 %@%@ · 已用 %ld 秒"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在逐項確認 %@%@ · 已用 %ld 秒"
+          }
+        }
+      }
+    },
     "Verifying SHA-256…": {
       "extractionState": "manual",
       "localizations": {
@@ -272405,6 +272949,22 @@
         }
       }
     },
+    "Workspace and Application Support are readable": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工作区与 Application Support 可读写"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工作區與 Application Support 可讀寫"
+          }
+        }
+      }
+    },
     "Workspace files": {
       "localizations": {
         "en": {
@@ -272423,6 +272983,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "工作區檔案"
+          }
+        }
+      }
+    },
+    "Workspace is not writable": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工作区不可写"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工作區不可寫"
+          }
+        }
+      }
+    },
+    "Workspace is writable": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工作区可写"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工作區可寫"
           }
         }
       }
@@ -277813,6 +278405,38 @@
         }
       }
     },
+    "git / tar / curl inside the sandbox": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沙箱里的 git / tar / curl"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沙箱裏的 git / tar / curl"
+          }
+        }
+      }
+    },
+    "git is not available in the sandbox": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沙箱里没有 git"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沙箱裏沒有 git"
+          }
+        }
+      }
+    },
     "github.com/user/repo/blob/main/SKILL.md": {
       "localizations": {
         "de": {
@@ -279700,6 +280324,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "iSH（ARM64 分支）"
+          }
+        }
+      }
+    },
+    "iSH Alpine emulation layer": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iSH Alpine 模拟层"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iSH Alpine 模擬層"
           }
         }
       }
@@ -281618,6 +282258,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "其餘順序不變"
+          }
+        }
+      }
+    },
+    "ripgrep and friends": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ripgrep 等搜索工具"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ripgrep 等搜索工具"
+          }
+        }
+      }
+    },
+    "ripgrep is not installed": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未安装 ripgrep"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未安裝 ripgrep"
           }
         }
       }
@@ -283912,6 +284584,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "可寫"
+          }
+        }
+      }
+    },
+    "zsh / libiosexec / make": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "zsh / libiosexec / make"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "zsh / libiosexec / make"
+          }
+        }
+      }
+    },
+    "zsh · libiosexec · make are present": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "zsh、libiosexec、make 均存在"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "zsh、libiosexec、make 均存在"
           }
         }
       }

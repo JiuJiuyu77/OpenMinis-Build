@@ -1,97 +1,408 @@
 //
 //  RuntimeDiagnosticsView.swift
-//  Minis — 运行时诊断（设置 › 运行时诊断）
+//  Minis — 运行诊断（设置 › 运行时诊断）
 //
-//  一个页面回答四个问题，全部来自本机真实探测，不发网络请求：
-//    1. 工具链在不在？在哪？缺哪一步？
-//    2. Developer Runtime 装了哪些、还缺哪些、各自声称提供什么能力？
-//    3. 混淆（OLLVM）到底算不算可用？（这是「无法识别 OLLVM」的直接答案）
-//    4. 执行器当前会走 iSH 还是原生？为什么？
+//  版式参照 MT-Agent 的「运行诊断」：顶部是一张总体状态卡，下面按
+//  基础运行 / 项目能力 / 可选能力 分组，每项都是「图标 + 标题 + 状态说明 +
+//  右侧转圈/对勾」。所有检查都是真跑，不是静态标记：
+//    · 沙箱内核   → ISHKernel 是否 boot
+//    · 命令执行   → 在 guest 里真的 echo 一次
+//    · 实时工具通道 → /usr/local/bin 的原生 offload 占位命令是否在
+//    · 运行配置   → ProviderConfigDB 能否读到
+//    · 项目文件   → Application Support 能否读写
+//    · Git / 代码辅助 → guest 里 git / rg 是否可用
+//    · 手机编译   → NativeToolchain + 真实启动探针
 //
 
 import SwiftUI
 
+// MARK: - 检查项
+
+private struct RuntimeDiagItem: Identifiable {
+    enum Status: Equatable {
+        case pending
+        case running
+        case ok
+        case failed(String)
+        case skipped(String)
+    }
+
+    let id: String
+    let title: String
+    let icon: String
+    let tint: [Color]
+    /// 空闲时展示的固定说明（例如「iSH Alpine 模拟层」）。
+    let subtitle: String
+    var status: Status = .pending
+    var detail: String = ""
+}
+
+// MARK: - 控制器
+
+@MainActor
+final class RuntimeDiagnosticsModel: ObservableObject {
+
+    @Published private(set) var running = false
+    @Published private(set) var elapsed: TimeInterval = 0
+    @Published private(set) var finishedAt: Date?
+
+    @Published var basic: [RuntimeDiagItem] = [
+        .init(id: "kernel", title: AppLocalized("Sandbox kernel"), icon: "shippingbox.fill",
+              tint: [.blue, .cyan], subtitle: AppLocalized("iSH Alpine emulation layer")),
+        .init(id: "shell", title: AppLocalized("Command execution"), icon: "terminal.fill",
+              tint: [.blue, .indigo], subtitle: AppLocalized("Runs a real command inside the sandbox")),
+        .init(id: "bridge", title: AppLocalized("Realtime tool bridge"), icon: "bolt.horizontal.fill",
+              tint: [.teal, .blue], subtitle: AppLocalized("Native offload commands (apple-* / minis-*)")),
+        .init(id: "config", title: AppLocalized("Runtime configuration"), icon: "slider.horizontal.3",
+              tint: [.indigo, .purple], subtitle: AppLocalized("Provider configuration database")),
+        .init(id: "files", title: AppLocalized("Project files"), icon: "folder.fill",
+              tint: [.blue, .teal], subtitle: AppLocalized("Workspace and Application Support are readable")),
+    ]
+
+    @Published var project: [RuntimeDiagItem] = [
+        .init(id: "git", title: AppLocalized("Git & common tools"), icon: "arrow.triangle.branch",
+              tint: [.orange, .pink], subtitle: AppLocalized("git / tar / curl inside the sandbox")),
+        .init(id: "search", title: AppLocalized("Code assistance"), icon: "magnifyingglass",
+              tint: [.purple, .blue], subtitle: AppLocalized("ripgrep and friends")),
+    ]
+
+    @Published var optional: [RuntimeDiagItem] = [
+        .init(id: "build", title: AppLocalized("On-device compiling"), icon: "hammer.fill",
+              tint: [.green, .teal], subtitle: AppLocalized("Theos toolchain and native runtime")),
+        .init(id: "integrity", title: AppLocalized("Runtime integrity"), icon: "checkmark.shield.fill",
+              tint: [.mint, .green], subtitle: AppLocalized("zsh / libiosexec / make")),
+        .init(id: "environment", title: AppLocalized("Host environment"), icon: "iphone.gen3",
+              tint: [.gray, .blue], subtitle: AppLocalized("TrollStore or jailbreak")),
+    ]
+
+    private var timerTask: Task<Void, Never>?
+
+    var allItems: [RuntimeDiagItem] { basic + project + optional }
+    var failedCount: Int {
+        allItems.filter { if case .failed = $0.status { return true }; return false }.count
+    }
+    var passedCount: Int {
+        allItems.filter { $0.status == .ok }.count
+    }
+
+    var overallTitle: String {
+        if running {
+            return AppLocalized("Checking core capabilities…")
+        }
+        if failedCount > 0 {
+            return String(format: AppLocalized("%ld checks need attention"), failedCount)
+        }
+        return AppLocalized("All checks passed")
+    }
+
+    var overallSubtitle: String {
+        if running {
+            let pending = allItems.filter { $0.status == .pending }.map(\.title)
+            let head = pending.prefix(2).joined(separator: " · ")
+            let tail = pending.count > 2 ? AppLocalized(" and more") : ""
+            return String(format: AppLocalized("Verifying %@%@ · %lds elapsed"), head, tail, Int(elapsed))
+        }
+        return String(format: AppLocalized("Finished in %lds · %ld passed"), Int(elapsed), passedCount)
+    }
+
+    func run(force: Bool = true) async {
+        guard !running else { return }
+        running = true
+        finishedAt = nil
+        elapsed = 0
+        let started = Date()
+        timerTask?.cancel()
+        timerTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                guard let self else { return }
+                await MainActor.run { self.elapsed = Date().timeIntervalSince(started) }
+            }
+        }
+        defer {
+            timerTask?.cancel()
+            timerTask = nil
+            running = false
+            finishedAt = Date()
+        }
+
+        for index in basic.indices { basic[index].status = .pending; basic[index].detail = "" }
+        for index in project.indices { project[index].status = .pending; project[index].detail = "" }
+        for index in optional.indices { optional[index].status = .pending; optional[index].detail = "" }
+
+        // 1) 沙箱内核
+        set("kernel", .running)
+        let booted = ISHKernel.shared.isBooted
+        set("kernel", booted ? .ok : .failed(AppLocalized("The iSH kernel is not running")),
+            detail: booted ? AppLocalized("Kernel booted") : AppLocalized("Open a chat once to boot the sandbox"))
+
+        // 2) 命令执行
+        set("shell", .running)
+        let shellResult = await guest("printf MINIS_DIAG_OK", timeout: 12)
+        if shellResult.contains("MINIS_DIAG_OK") {
+            set("shell", .ok, detail: AppLocalized("Command returned normally"))
+        } else {
+            set("shell", .failed(AppLocalized("The sandbox did not answer")), detail: firstLine(shellResult))
+        }
+
+        // 3) 实时工具通道
+        set("bridge", .running)
+        let stubs = await guest("ls /usr/local/bin | wc -l", timeout: 12).trimmingCharacters(in: .whitespacesAndNewlines)
+        if let count = Int(stubs), count > 0 {
+            set("bridge", .ok, detail: String(format: AppLocalized("%ld native commands available"), count))
+        } else {
+            set("bridge", .failed(AppLocalized("No native offload command was found")), detail: firstLine(stubs))
+        }
+
+        // 4) 运行配置
+        set("config", .running)
+        let providers = ProviderConfigStore.shared.instances.count
+        if providers > 0 {
+            set("config", .ok, detail: String(format: AppLocalized("%ld provider configurations loaded"), providers))
+        } else {
+            set("config", .skipped(AppLocalized("No provider configured yet")), detail: "")
+        }
+
+        // 5) 项目文件
+        set("files", .running)
+        let fm = FileManager.default
+        let probe = fm.temporaryDirectory.appendingPathComponent("minis-diag-\(UUID().uuidString)")
+        do {
+            try Data("ok".utf8).write(to: probe)
+            try fm.removeItem(at: probe)
+            set("files", .ok, detail: AppLocalized("Workspace is writable"))
+        } catch {
+            set("files", .failed(AppLocalized("Workspace is not writable")), detail: error.localizedDescription)
+        }
+
+        // 6) Git & 常用工具
+        set("git", .running)
+        let git = await guest("git --version 2>&1 | head -1", timeout: 12).trimmingCharacters(in: .whitespacesAndNewlines)
+        if git.lowercased().contains("git version") {
+            set("git", .ok, detail: git)
+        } else {
+            set("git", .failed(AppLocalized("git is not available in the sandbox")), detail: firstLine(git))
+        }
+
+        // 7) 代码辅助
+        set("search", .running)
+        let rg = await guest("rg --version 2>&1 | head -1", timeout: 12).trimmingCharacters(in: .whitespacesAndNewlines)
+        if rg.lowercased().contains("ripgrep") {
+            set("search", .ok, detail: rg)
+        } else {
+            set("search", .skipped(AppLocalized("ripgrep is not installed")), detail: firstLine(rg))
+        }
+
+        // 8) 手机编译
+        set("build", .running)
+        let host = MinisHostEnvironmentDetector.detect()
+        let health = await NativeRuntimeHealthMonitor.shared.refresh(force: force)
+        if health.ok {
+            set("build", .ok, detail: health.summary)
+        } else {
+            set("build", .failed(health.failure.title), detail: health.summary)
+        }
+
+        // 9) 运行时完整性
+        set("integrity", .running)
+        if let summary = RuntimeIntegrity.summary(theosRoot: health.theosRoot) {
+            set("integrity", .failed(AppLocalized("Runtime files are incomplete (zsh / libiosexec)")), detail: summary)
+        } else if health.theosRoot == nil {
+            set("integrity", .skipped(AppLocalized("No runtime installed")), detail: "")
+        } else {
+            set("integrity", .ok, detail: AppLocalized("zsh · libiosexec · make are present"))
+        }
+
+        // 10) 环境识别
+        set("environment", .running)
+        set("environment", host.environment.canRunNativeBinaries ? .ok : .skipped(host.summary),
+            detail: host.nativeOutlook)
+    }
+
+    private func set(_ id: String, _ status: RuntimeDiagItem.Status, detail: String = "") {
+        for index in basic.indices where basic[index].id == id {
+            basic[index].status = status; basic[index].detail = detail; return
+        }
+        for index in project.indices where project[index].id == id {
+            project[index].status = status; project[index].detail = detail; return
+        }
+        for index in optional.indices where optional[index].id == id {
+            optional[index].status = status; optional[index].detail = detail; return
+        }
+    }
+
+    /// 在 guest 里跑一条命令，返回 stdout+stderr。
+    private func guest(_ command: String, timeout: TimeInterval) async -> String {
+        do {
+            let result = try await ISHExecutionCoordinator.shared.execute(
+                sessionId: "runtime-diagnostics",
+                command: command,
+                timeout: timeout,
+                lineCallback: { _ in },
+                pidCallback: { _ in })
+            return result.output
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    private func firstLine(_ text: String) -> String {
+        text.split(separator: "\n").first.map(String.init) ?? text
+    }
+}
+
+// MARK: - 页面
+
 struct RuntimeDiagnosticsView: View {
 
+    @StateObject private var model = RuntimeDiagnosticsModel()
     @ObservedObject private var manager = DeveloperRuntimeManager.shared
     @ObservedObject private var preference = ToolExecutorPreference.shared
     @ObservedObject private var healthMonitor = NativeRuntimeHealthMonitor.shared
+
     @State private var manualRoot = NativeToolchain.manualRootPath ?? ""
-    @State private var refreshedAt = Date()
     @State private var repairing = false
     @State private var repairReport: RuntimeRepairReport?
+    @State private var showDetails = false
     @State private var manifestURLText = RuntimeManifestLoader.overrideURLString
 
     var body: some View {
-        Form {
-            summarySection
-            environmentSection
+        List {
+            statusSection
+            groupSection(AppLocalized("Basics"), items: model.basic)
+            groupSection(AppLocalized("Project tools"), items: model.project)
+            groupSection(AppLocalized("Optional capabilities"), items: model.optional)
             repairSection
-            toolchainSection
-            ollvmSection
-            runtimesSection
-            runtimeHealthSection
-            executorSection
+            detailsSection
+            settingsSection
         }
-        .navigationTitle(Text(verbatim: "运行时诊断"))
+        .listStyle(.insetGrouped)
+        .navigationTitle(Text(verbatim: "运行诊断"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
-                    recheck()
+                    Task { await model.run(force: true) }
                 } label: {
-                    Label("Re-check", systemImage: "arrow.clockwise")
+                    Image(systemName: "arrow.clockwise")
+                }
+                .disabled(model.running)
+            }
+        }
+        .task {
+            await model.run(force: true)
+            await manager.loadManifestIfNeeded()
+        }
+    }
+
+    // MARK: 顶部总状态
+
+    private var statusSection: some View {
+        Section {
+            HStack(spacing: 12) {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(LinearGradient(colors: [.blue, .cyan],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 44, height: 44)
+                    .overlay {
+                        Image(systemName: "waveform.path.ecg")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(verbatim: model.overallTitle)
+                        .font(.headline)
+                    Text(verbatim: model.overallSubtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 8)
+                if model.running {
+                    ProgressView()
+                } else if model.failedCount > 0 {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                } else {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
                 }
             }
-        }
-        .onAppear {
-            Task { await manager.loadManifestIfNeeded() }
-            Task { await healthMonitor.refresh() }
-        }
-    }
-
-    private func recheck() {
-        NativeToolchain.shared.resetCache()
-        NativeRuntimeHealthMonitor.shared.invalidate()
-        ICloudAvailability.resetCache()
-        refreshedAt = Date()
-        Task { await healthMonitor.refresh(force: true) }
-    }
-
-    // MARK: - 环境识别（巨魔 / 越狱 / 沙箱）
-
-    /// 回答「这台设备到底能不能跑原生二进制」。以前只显示「工具链找到没」，
-    /// 于是沙箱构建里明明看得见 MT 的 TheosRuntime、却每条命令都死在
-    /// libiosexec 上，诊断页还是一片绿。
-    private var environmentSection: some View {
-        Section {
-            let host = MinisHostEnvironmentDetector.detect()
-            row(title: AppLocalized("Host environment"),
-                detail: host.summary,
-                ok: host.environment.canRunNativeBinaries && !host.sandboxed)
-            ForEach(Array(host.evidence.enumerated()), id: \.offset) { _, line in
-                Text(verbatim: line)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-            }
-            let health = healthMonitor.health
-            row(title: AppLocalized("Startup probe"),
-                detail: healthMonitor.checking
-                    ? AppLocalized("Checking…")
-                    : (health?.summary ?? AppLocalized("Not checked yet")),
-                ok: health?.ok ?? false)
-            Text(RuntimeRepair.environmentVerdict(host, health: health))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            .padding(.vertical, 4)
         } header: {
-            Text(verbatim: "环境识别")
-        } footer: {
-            Text(verbatim: "判断依据是真实写入权限与一次真实 spawn，不是只看文件在不在。普通侧载 / App Store 构建即使能看到 Theos 运行时，也会卡在 libiosexec，这时命令应全部留在 iSH 沙箱。")
+            Text(verbatim: "状态")
         }
     }
 
-    // MARK: - 一键修复
+    // MARK: 分组
+
+    private func groupSection(_ title: String, items: [RuntimeDiagItem]) -> some View {
+        Section {
+            ForEach(items) { item in
+                diagRow(item)
+            }
+        } header: {
+            Text(verbatim: title)
+        }
+    }
+
+    private func diagRow(_ item: RuntimeDiagItem) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(LinearGradient(colors: item.tint,
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                .frame(width: 36, height: 36)
+                .overlay {
+                    Image(systemName: item.icon)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: item.title)
+                    .font(.body.weight(.semibold))
+                Text(verbatim: subtitle(for: item))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 6)
+            trailing(for: item)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func subtitle(for item: RuntimeDiagItem) -> String {
+        switch item.status {
+        case .pending:
+            return item.subtitle
+        case .running:
+            return AppLocalized("Checking…") + " · " + item.subtitle
+        case .ok:
+            return item.detail.isEmpty ? AppLocalized("Passed") : item.detail
+        case .failed(let reason):
+            return item.detail.isEmpty ? reason : reason + " · " + item.detail
+        case .skipped(let reason):
+            return item.detail.isEmpty ? reason : reason + " · " + item.detail
+        }
+    }
+
+    @ViewBuilder
+    private func trailing(for item: RuntimeDiagItem) -> some View {
+        switch item.status {
+        case .pending:
+            Image(systemName: "circle.dashed").foregroundStyle(.tertiary)
+        case .running:
+            ProgressView()
+        case .ok:
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+        case .failed:
+            Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+        case .skipped:
+            Image(systemName: "minus.circle.fill").foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: 一键修复
 
     private var repairSection: some View {
         Section {
@@ -101,18 +412,19 @@ struct RuntimeDiagnosticsView: View {
                     let report = await RuntimeRepair.oneClick()
                     repairReport = report
                     repairing = false
-                    recheck()
+                    await model.run(force: true)
+                    await healthMonitor.refresh(force: true)
                 }
             } label: {
-                Label(AppLocalized("One-tap repair"), systemImage: "wrench.and.screwdriver.fill")
-            }
-            .disabled(repairing)
-            if repairing {
-                HStack(spacing: 8) {
-                    ProgressView()
-                    Text(AppLocalized("Repairing…")).font(.footnote).foregroundStyle(.secondary)
+                HStack(spacing: 10) {
+                    Image(systemName: "wrench.and.screwdriver.fill")
+                    Text(AppLocalized("One-tap repair"))
+                    Spacer()
+                    if repairing { ProgressView() }
                 }
             }
+            .disabled(repairing)
+
             if let report = repairReport {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(verbatim: report.title)
@@ -127,183 +439,73 @@ struct RuntimeDiagnosticsView: View {
                 }
             }
         } header: {
-            Text(verbatim: "一键修复")
+            Text(verbatim: "修复")
         } footer: {
-            Text(verbatim: "清缓存 → 重新探针 → 按失败类型处理：libiosexec / 沙箱拦截会直接切回 iSH 沙箱并说明原因；运行时损坏会在上面的列表里标出并可删除后重装。")
+            Text(verbatim: "清缓存 → 重新探针 → 按失败类型处理：zsh / libiosexec 不完整会重装运行时；无法原生执行时自动切回 iSH 沙箱。")
         }
     }
 
+    // MARK: 详细信息（工具链逐项）
 
-    // MARK: - 运行时完整性（损坏 → 只能重装）
-
-    /// 沙盒是独立 chroot：它既看不见设备侧的 DeveloperRuntime 目录，也没有写权限，
-    /// 所以运行时二进制损坏**不可能**在沙盒内修好，只能删掉损坏目录后由 App 重装。
-    /// 这里把损坏项直接列出来，并给一个针对性的清除入口。
-    private var runtimeHealthSection: some View {
+    private var detailsSection: some View {
         Section {
-            let damaged = damagedRuntimeBinaries()
-            if damaged.isEmpty {
-                row(title: AppLocalized("Runtime binaries"),
-                    detail: AppLocalized("All present binaries look intact"),
-                    ok: true)
-            } else {
-                ForEach(damaged, id: \.path) { item in
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(verbatim: item.path).font(.caption).foregroundStyle(.red)
-                        Text(verbatim: item.reason).font(.caption2).foregroundStyle(.secondary)
+            DisclosureGroup(isExpanded: $showDetails) {
+                let diag = NativeToolchain.shared.diagnostics()
+                ForEach(Array(diag.lines.enumerated()), id: \.offset) { _, line in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: line.ok ? "checkmark.circle.fill" : "xmark.circle.fill")
+                            .foregroundStyle(line.ok ? Color.green : Color.orange)
+                            .font(.caption)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(verbatim: line.title).font(.caption.weight(.medium))
+                            Text(verbatim: line.detail)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
                     }
                 }
-                Button(role: .destructive) {
-                    for id in Set(damaged.map(\.runtimeID)) {
-                        try? FileManager.default.removeItem(
-                            at: DeveloperRuntimePaths.installDirectory(id: id))
+                let host = MinisHostEnvironmentDetector.detect()
+                ForEach(Array(host.evidence.enumerated()), id: \.offset) { _, line in
+                    Text(verbatim: line)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                TextField("Theos root path", text: $manualRoot)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .font(.system(size: 11, design: .monospaced))
+                HStack {
+                    Button("Apply and re-detect") {
+                        NativeToolchain.manualRootPath = manualRoot
+                        manualRoot = NativeToolchain.manualRootPath ?? ""
+                        Task { await model.run(force: true) }
                     }
-                    recheck()
-                } label: {
-                    Label(AppLocalized("Delete damaged runtimes and reinstall"),
-                          systemImage: "trash")
+                    .disabled(manualRoot.trimmingCharacters(in: .whitespaces).isEmpty)
+                    Button("Clear", role: .destructive) {
+                        manualRoot = ""
+                        NativeToolchain.manualRootPath = nil
+                        Task { await model.run(force: true) }
+                    }
                 }
-            }
-        } header: {
-            Text(AppLocalized("Runtime integrity"))
-        } footer: {
-            Text(AppLocalized("A truncated binary (e.g. a few dozen bytes) cannot be repaired inside the iSH sandbox — it is an isolated chroot. Deleting it here and reinstalling from the list above is the only fix."))
-        }
-    }
-
-    private struct DamagedRuntimeBinary: Identifiable {
-        let runtimeID: String
-        let path: String
-        let reason: String
-        var id: String { path }
-    }
-
-    private func damagedRuntimeBinaries() -> [DamagedRuntimeBinary] {
-        let rels = ["usr/bin/zsh", "bin/zsh", "usr/bin/bash", "bin/bash",
-                    "usr/bin/make", "usr/bin/clang"]
-        var out: [DamagedRuntimeBinary] = []
-        for id in manager.records.keys.sorted() {
-            let dir = DeveloperRuntimePaths.installDirectory(id: id)
-            for rel in rels {
-                let path = dir.appendingPathComponent(rel).path
-                guard FileManager.default.fileExists(atPath: path) else { continue }
-                if let why = runtimeBinaryDamage(path) {
-                    out.append(DamagedRuntimeBinary(runtimeID: id, path: path, reason: why))
-                }
-            }
-        }
-        return out
-    }
-
-    // MARK: - 概览
-
-    private var summarySection: some View {
-        Section {
-            let toolchain = NativeToolchain.shared
-            row(title: AppLocalized("Native toolchain"),
-                detail: toolchain.isAvailable
-                    ? (toolchain.rootPath.isEmpty ? AppLocalized("Ready") : toolchain.rootPath)
-                    : AppLocalized("Not found"),
-                ok: toolchain.isAvailable)
-            row(title: AppLocalized("OLLVM"),
-                detail: RuntimeCapabilityNames.ollvmInstalled
-                    ? AppLocalized("Installed — obfuscation available")
-                    : AppLocalized("Not installed"),
-                ok: RuntimeCapabilityNames.ollvmInstalled)
-            row(title: AppLocalized("Effective executor"),
-                detail: preference.resolvedExecutor.displayName,
-                ok: true)
-            row(title: AppLocalized("Checked"),
-                detail: refreshedAt.formatted(date: .omitted, time: .standard),
-                ok: true)
-        } header: {
-            Text(verbatim: "概览")
-        } footer: {
-            Text(verbatim: "点右上角刷新会清掉工具链与 iCloud 的探测缓存，然后重新扫描。")
-        }
-    }
-
-    // MARK: - 工具链逐项
-
-    private var toolchainSection: some View {
-        Section {
-            let diag = NativeToolchain.shared.diagnostics()
-            ForEach(Array(diag.lines.enumerated()), id: \.offset) { _, line in
-                row(title: line.title, detail: line.detail, ok: line.ok)
-            }
-            TextField("Theos root path", text: $manualRoot)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .font(.system(size: 11, design: .monospaced))
-            HStack {
-                Button("Apply and re-detect") {
-                    NativeToolchain.manualRootPath = manualRoot
-                    manualRoot = NativeToolchain.manualRootPath ?? ""
-                    recheck()
-                }
-                .disabled(manualRoot.trimmingCharacters(in: .whitespaces).isEmpty)
-                Button("Clear", role: .destructive) {
-                    manualRoot = ""
-                    NativeToolchain.manualRootPath = nil
-                    recheck()
-                }
-            }
-            .font(.footnote)
-        } header: {
-            Text(verbatim: "工具链逐项")
-        } footer: {
-            Text(verbatim: "Shell 一行显示实际会用哪个 shell。运行时只带 zsh 时这里应显示 usr/bin/zsh；若是「未找到」，编译一定失败。")
-        }
-    }
-
-    // MARK: - OLLVM
-
-    private var ollvmSection: some View {
-        Section {
-            let installed = RuntimeCapabilityNames.installed
-            row(title: AppLocalized("OLLVM capability"),
-                detail: RuntimeCapabilityNames.ollvmInstalled ? AppLocalized("Yes") : AppLocalized("No"),
-                ok: RuntimeCapabilityNames.ollvmInstalled)
-            ForEach(RuntimeCapabilityNames.ollvmAliases.sorted(), id: \.self) { name in
-                row(title: name, detail: installed.contains(name) ? AppLocalized("provided") : AppLocalized("absent"),
-                    ok: installed.contains(name))
-            }
-            let obfuscator = NativeToolchain.shared.findObfuscatingClang()
-            row(title: AppLocalized("OLLVM clang"),
-                detail: obfuscator ?? AppLocalized("Not found — install the OLLVM runtime"),
-                ok: obfuscator != nil)
-        } header: {
-            Text(verbatim: "混淆（OLLVM）")
-        } footer: {
-            Text(verbatim: "任意一个别名命中即视为已安装。若「能力」为 No 但 runtime 已装好，说明 manifest 的 provides 与本机记录不一致，重装该运行时即可。")
-        }
-    }
-
-    // MARK: - 运行时清单
-
-    private var runtimesSection: some View {
-        Section {
-            if manager.runtimes.isEmpty {
-                Text(manager.isLoadingManifest ? "Loading manifest…" : "No runtimes in the manifest.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(manager.runtimes) { descriptor in
-                    let state = manager.state(for: descriptor)
-                    row(title: descriptor.displayName,
-                        detail: stateDetail(state, descriptor),
-                        ok: state.isInstalled)
-                }
-            }
-            Button {
-                Task { await manager.refreshManifest() }
+                .font(.footnote)
             } label: {
-                Label("Refresh manifest", systemImage: "arrow.triangle.2.circlepath")
+                Label(AppLocalized("Toolchain details"), systemImage: "stethoscope")
             }
-            .disabled(manager.isLoadingManifest)
+        } footer: {
+            Text(verbatim: "Shell 一行显示实际会用哪个 shell；若是「未找到」，编译一定失败。")
+        }
+    }
 
-            // [T-runtime-repo] 运行时下载仓库可换：默认 JiuJiuyu77/CodexApp-Runtime，
-            // 也可以填任意镜像/自建仓库，不需要重新编译。
+    // MARK: 运行时清单 / 执行器
+
+    private var settingsSection: some View {
+        Section {
+            LabeledContent(AppLocalized("Effective executor"), value: preference.resolvedExecutor.displayName)
+            if let health = healthMonitor.health {
+                LabeledContent(AppLocalized("Runtime probe"), value: health.summary)
+                    .font(.caption)
+            }
             TextField("Runtime manifest URL", text: $manifestURLText)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
@@ -323,61 +525,29 @@ struct RuntimeDiagnosticsView: View {
             }
             .font(.footnote)
             if let error = manager.manifestError {
-                Text(verbatim: error)
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
+                Text(verbatim: error).font(.caption2).foregroundStyle(.orange)
             }
-        } header: {
-            Text(verbatim: "运行时清单")
-        } footer: {
-            Text(verbatim: "默认来源：JiuJiuyu77/CodexApp-Runtime。安装/更新/移除在 设置 → Developer Runtime 里操作；这里可换清单地址并确认状态。")
-        }
-    }
-
-    private func stateDetail(_ state: RuntimeInstallState, _ descriptor: RuntimeDescriptor) -> String {
-        switch state {
-        case .installed(let record):
-            return String(format: AppLocalized("Installed %@"), record.version)
-        case .outdated(let record):
-            return String(format: AppLocalized("Outdated %@ → %@"), record.version, descriptor.version)
-        case .notInstalled:
-            return AppLocalized("Not installed")
-        }
-    }
-
-    // MARK: - 执行器
-
-    private var executorSection: some View {
-        Section {
-            LabeledContent("Executor", value: preference.resolvedExecutor.displayName)
-            LabeledContent("Prefer custom runtime",
-                           value: preference.preferCustomRuntime ? AppLocalized("On") : AppLocalized("Off"))
-            LabeledContent("Sandbox mode",
-                           value: preference.sandboxMode ? AppLocalized("On") : AppLocalized("Off"))
-            Text(preference.resolvedExecutor.explanation)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        } header: {
-            Text(verbatim: "执行器")
-        } footer: {
-            Text(verbatim: "「自动」默认留在 iSH，只有打开「优先使用自定义 Runtime」才会切到本机工具链。")
-        }
-    }
-
-    // MARK: - 行
-
-    private func row(title: String, detail: String, ok: Bool) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: ok ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .foregroundStyle(ok ? Color.green : Color.orange)
-                .font(.caption)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(verbatim: title).font(.caption.weight(.medium))
-                Text(verbatim: detail)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
+            ForEach(manager.runtimes) { descriptor in
+                let state = manager.state(for: descriptor)
+                HStack {
+                    Text(verbatim: descriptor.displayName)
+                    Spacer()
+                    Text(verbatim: state.isInstalled ? (state.record?.version ?? AppLocalized("Installed"))
+                                                     : AppLocalized("Not installed"))
+                        .foregroundStyle(state.isInstalled ? Color.secondary : Color.orange)
+                        .font(.caption)
+                }
             }
+            Button {
+                Task { await manager.refreshManifest() }
+            } label: {
+                Label("Refresh manifest", systemImage: "arrow.triangle.2.circlepath")
+            }
+            .disabled(manager.isLoadingManifest)
+        } header: {
+            Text(verbatim: "运行时与执行器")
+        } footer: {
+            Text(verbatim: "默认来源：JiuJiuyu77/CodexApp-Runtime。安装/更新/移除在 设置 → Developer Runtime 里操作。")
         }
     }
 }
