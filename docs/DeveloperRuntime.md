@@ -326,3 +326,24 @@ TrollStore 的 CoreTrust 绕过路径。
 `codex-sign` 没进包也能跑：signer 会退化成 `Ad-hoc signed only` 并在记录里写明原因；
 也可以把 `codex-sign` 放到 `Application Support/DeveloperRuntime/Helpers/codex-sign`，
 不重新打包即生效。
+
+## 为什么不安装 Codex 运行时
+
+运行时清单里的 `codex` 条目（`codex.cli` / `codex.app-server` / `codex.code-mode`）
+是**另一套 App 的 AI 执行层**：它把自己的 agent、app-server 协议与 Code Mode Host
+一起打成一个 rootless deb。Minis 有自己的 Agent 架构（工具循环、会话、能力注册表都在
+本仓库内），接管别人的 agent 运行时既没有必要，也会把两套协议混在一起。
+
+因此：
+
+- `DeveloperRuntimeManager.unsupportedHandlers = ["codex"]` —— 列表、安装、能力都不出现；
+- `install(_:)` 里加了防御：即使把自定义清单地址指向含 `codex` 的清单，也不会装；
+- `scripts/check_runtime_manifest.py` 把 `codex` 放进 `IGNORED_HANDLERS`，只做形状校验，
+  不因为「装不了」报错；同时不再把 `codex.cli` 当作必需能力。
+
+**采纳**的是工具链类运行时：`theos`（clang/ld64/ldid/dpkg-deb/SDK）、`ollvm`、
+`node`、`python`、`core_tools`、`build_tools`、`reverse_tools` —— 这些是「在真机上编译
+与打包」的通用能力，与谁的 AI 层无关。
+
+顺带说明一个名词：`Helpers/codex-sign` 里的 “codex” 与 Codex AI 无关，它是 TrollStore
+血统的签名工具名（补 App Store 形态 CodeDirectory），本分支的签名层用的就是它。

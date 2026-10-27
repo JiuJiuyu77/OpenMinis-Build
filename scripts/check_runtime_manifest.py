@@ -30,7 +30,11 @@ import urllib.request
 MANIFEST_SCHEMA = 4
 SUPPORTED_HANDLERS = {"portable-v1", "codex", "python", "theos", "reverse_tools"}
 SUPPORTED_ARCHIVES = (".tar.gz", ".tgz", ".deb")
-DEFAULT_REQUIRED_CAPABILITIES = ("ios.toolchain", "ios.package", "codex.cli")
+# Minis consumes the toolchain runtimes only. `codex` (Codex CLI / app-server /
+# Code Mode) belongs to another app's agent stack and is intentionally ignored,
+# so its capabilities must NOT be required here.
+DEFAULT_REQUIRED_CAPABILITIES = ("ios.toolchain", "ios.package")
+IGNORED_HANDLERS = {"codex"}
 
 errors: list[str] = []
 warnings: list[str] = []
@@ -73,6 +77,10 @@ def check_runtime(runtime_id: str, runtime: dict, handlers_seen: set) -> None:
 
     handler = runtime.get("handler")
     handlers_seen.add(handler)
+    if handler in IGNORED_HANDLERS:
+        # Deliberately not installed by Minis; nothing to validate beyond the
+        # shape checks below.
+        return
     if handler not in SUPPORTED_HANDLERS:
         error(f"{where}: handler {handler!r} is not implemented by the installer "
               f"(supported: {', '.join(sorted(SUPPORTED_HANDLERS))})")
