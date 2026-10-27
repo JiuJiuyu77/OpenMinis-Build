@@ -176,7 +176,7 @@ enum MinisHostEnvironmentDetector {
     /// 读取本进程的一项 entitlement。`SecTask` 是 Security 框架里读签名权限的
     /// 唯一公开入口；失败时返回 false（宁可保守，也不要误报「可以原生执行」）。
     private static func entitlementBool(_ key: String) -> Bool {
-        guard let task = MinisSecTaskCreateFromSelf() else { return false }
+        guard let task = MinisSecTaskCreateFromSelf(nil) else { return false }
         guard let value = MinisSecTaskCopyValueForEntitlement(task, key as CFString, nil) else { return false }
         if let number = value as? NSNumber { return number.boolValue }
         if let bool = value as? Bool { return bool }

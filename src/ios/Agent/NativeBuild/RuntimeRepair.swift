@@ -34,6 +34,8 @@ enum RuntimeRepair {
             return AppLocalized("Install the Theos runtime from Settings → Developer Runtime.")
         case .shellMissing:
             return AppLocalized("Reinstall the Theos runtime — it has no usable shell inside.")
+        case .runtimeDamaged:
+            return AppLocalized("Open Settings → Runtime diagnostics and tap One-tap repair: it reinstalls the incomplete runtime (zsh / libiosexec).")
         case .spawnDenied, .dyldBlocked, .crashed, .timedOut, .unknown:
             return AppLocalized("Open Settings → Runtime diagnostics and tap One-tap repair: it copies the runtime into the app container, then switches to the iSH sandbox if native execution is still impossible.")
         }
