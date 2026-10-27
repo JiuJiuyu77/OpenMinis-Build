@@ -1,0 +1,96 @@
+# Guard the developer-runtime contract.
+#
+# The runtime manifest is data, so a new or edited runtime reaches users without
+# an app build — which also means a bad entry ships straight to devices. This
+# workflow fails when the published manifest advertises something the installer
+# in this branch cannot honour (unknown handler, unsupported archive format,
+# digests that are not 64-hex, an `install` block that would let a broken tree
+# pass the new self-check), and it parses the runtime Swift sources so a syntax
+# error is caught without a full IPA build.
+#
+# Runs daily as well: the manifest changes out of band.
+
+name: Runtime contract
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * *"
+  push:
+    paths:
+      - "scripts/check_runtime_manifest.py"
+      - "src/ios/Agent/Runtime/**"
+      - "src/ios/Views/Settings/DeveloperRuntimeSettingsView.swift"
+      - ".github/workflows/runtime-contract.yml"
+  pull_request:
+    paths:
+      - "scripts/check_runtime_manifest.py"
+      - "src/ios/Agent/Runtime/**"
+      - "src/ios/Views/Settings/DeveloperRuntimeSettingsView.swift"
+      - ".github/workflows/runtime-contract.yml"
+
+permissions:
+  contents: read
+
+env:
+  MANIFEST_URL: https://raw.githubusercontent.com/JiuJiuyu77/CodexApp-Runtime/main/Runtime/runtime-manifest.json
+
+jobs:
+  manifest:
+    name: Published manifest stays installable
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python version
+        run: python3 -V
+
+      - name: "Check the live manifest (3 attempts, raw.githubusercontent is flaky)"
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            echo "::group::attempt $attempt"
+            if python3 scripts/check_runtime_manifest.py --manifest "$MANIFEST_URL"; then
+              echo "::endgroup::"
+              exit 0
+            fi
+            echo "::endgroup::"
+            sleep $((attempt * 5))
+          done
+          echo "manifest check failed after 3 attempts" >&2
+          exit 1
+
+      - name: Installer handlers the app actually implements
+        run: |
+          echo "Supported handlers: portable-v1, codex, python, theos, reverse_tools"
+          echo "Supported archives: .tar.gz, .tgz, .deb (data.tar.gz / data.tar.zst)"
+          grep -n "SUPPORTED_HANDLERS\|SUPPORTED_ARCHIVES" scripts/check_runtime_manifest.py | head -5
+
+  swift-syntax:
+    name: Runtime sources parse
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.0"
+
+      - name: swiftc -parse (syntax only, no iOS SDK needed)
+        run: |
+          set -euo pipefail
+          swiftc -version
+          swiftc -parse src/ios/Agent/Runtime/*.swift
+          swiftc -parse src/ios/Views/Settings/DeveloperRuntimeSettingsView.swift
+          echo "runtime sources parse cleanly"
+
+      - name: Self-check plumbing is wired
+        run: |
+          set -euo pipefail
+          # 这三处是本 branch 的适配点，被回退时立刻可见。
+          grep -q "RuntimeInstallVerifier.verify" src/ios/Agent/Runtime/DeveloperRuntimeManager.swift
+          grep -q "RuntimeEnvironmentOverlay.build" src/ios/Agent/Runtime/DeveloperRuntimeManager.swift
+          grep -q "installSpecOrNone" src/ios/Agent/Runtime/RuntimeManifest.swift
+          echo "self-check + environment overlay are wired into the manager"

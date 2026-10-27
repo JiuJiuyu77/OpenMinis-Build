@@ -204,3 +204,66 @@ adhoc / TrollStore 重签会丢掉 `com.apple.developer.icloud-*` 权限，此�
 2. OLLVM：能力别名逐项 + 找到的混淆编译器；
 3. 运行时清单：每个运行时的已装/过旧/未装状态；
 4. 执行器：有效执行器、是否「优先自定义 Runtime」、是否强制沙箱。
+
+## 清单 install 块自检（本分支新增）
+
+清单里 `install` 块此前被完全忽略：装完即「成功」，于是缺 `devkit/node/include`、
+缺 `Frameworks/NodeMobile.framework` 或 `bin/` 里只有半个工具的树，也会被记成已安装。
+现在按清单契约补齐三件事。
+
+| 文件 | 职责 |
+|---|---|
+| `src/ios/Agent/Runtime/RuntimeInstallSpec.swift` | 解码 `install`（`required_paths` / `path_entries` / `persistent_path_entries` / `environment` / `probe` / `sign_paths`），并把清单环境翻译成子进程环境 |
+| `src/ios/Agent/Runtime/RuntimeInstallVerifier.swift` | 解包后自检：路径闸门 + `probe` 真实执行（`posix_spawn`，不用 `Process`——iOS 上没有） |
+| `src/ios/Agent/Runtime/DeveloperRuntimeManager.swift` | 在 staging 里先验再提交；记录自检结论；环境导出改走 overlay；依赖计算补上能力级 `requires` |
+
+### 三种自检结论
+
+| 结论 | 触发条件 | 安装结果 |
+|---|---|---|
+| `passed` | 路径齐 + probe 退出码 0 + 输出含 `contains` | 提交 |
+| `skipped` | 路径齐，但当前环境不能执行设备原生二进制（App 沙盒 / 侧载） | 提交，UI 显示「未自检 + 原因」 |
+| `failed` | 路径缺项 / probe 起不来 / 输出不匹配 / 超时 | **不提交**，暂存目录丢弃，上一份可用安装保留 |
+
+失败不会覆盖已有运行时：换版本失败时，用户手上的 Theos 仍然是能编译的那一份。
+probe 输出会被截断到 4KB 并写进日志与设置页，便于区分「包坏了」和「环境不允许执行」。
+
+### 环境导出（清单优先于目录猜测）
+
+`DeveloperRuntimeManager.environment(for:)` 不再猜 `usr/bin` / `bin`，而是按清单：
+
+- `install.path_entries` → `PATH` 前缀（缺项回退到 `usr/bin`、`bin`）；
+- `install.environment` → 原样导出，`${RUNTIME_ROOT}` 展开为安装根；
+- 额外导出 `CA_RUNTIME_ID` / `CA_RUNTIME_VERSION` / `CA_RUNTIME_HANDLER` /
+  `CA_RUNTIME_ROOT` / `CA_TOOL_<ID>_RUNTIME_ROOT`（键名大写下划线，与运行时端一致）；
+- `handler: theos` 时按树结构派生 `CA_THEOS_SDKROOT` / `CA_THEOS_CLANG` /
+  `CA_THEOS_CLANGXX` / `CA_THEOS_MAKE` / `CA_THEOS_BASH`，同时保留旧的
+  `THEOS` / `THEOS_SDKROOT` 键。
+
+这几个 `CA_*` 不是新发明：Node 运行时的 `lib/codex/native-support.js` 用
+`CA_TOOL_NODE_RUNTIME_ROOT` 定位自身、用 `$SHELL || $CA_THEOS_BASH` 选 shell，
+`ios-bootstrap.js` 用 `CA_THEOS_SDKROOT` + `CA_THEOS_CLANG` 决定是否注入
+`SDKROOT` / `CC` / `CFLAGS` / `LDFLAGS` / `GYP_DEFINES`。导出这些变量，装的 Node
+运行时才真的能 `npm install` 编原生扩展，而不是「装着但用不起来」。
+
+### 依赖解析包含能力级 `requires`
+
+`missingRequirements(for:)` 现在同时看两处：
+
+- 运行时级 `requires`（裸 id 或 `{id, provides, reason}` 对象，两种都解码）；
+- 能力级 `capabilities.<id>.requires`，例如 `node.native-addon` 依赖 theos 提供的
+  `ios.toolchain`、`build.cmake-ios` 同样依赖 `ios.toolchain`。
+
+只装 Node 不装 Theos 时，能力页会直接说缺什么，而不是等到编译阶段才失败。
+
+### CI
+
+`.github/workflows/runtime-contract.yml`：
+
+1. **manifest** —— 每天 + 每次改动跑 `scripts/check_runtime_manifest.py`，校验线上清单
+   仍是 schema 4、handler 都在安装器实现范围内（`portable-v1` / `codex` / `python` /
+   `theos` / `reverse_tools`）、归档格式可解（`.tar.gz` / `.tgz` / `.deb`）、
+   `install` 块不会放行坏包（绝对路径、probe 不在 `required_paths` 内、
+   `sign_paths` 越界、环境值缺 `${RUNTIME_ROOT}`）、摘要为 64 位小写 hex；
+2. **swift-syntax** —— Ubuntu + Swift 6，`swiftc -parse` 解析 Runtime 目录与设置页
+   （只校验语法，不需要 iOS SDK），并断言自检与 overlay 仍接在管理器上。

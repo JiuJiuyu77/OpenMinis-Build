@@ -10,6 +10,30 @@ struct RuntimeRecommendation: Codable, Hashable {
     let reason: String?
 }
 
+/// One entry of `requires`. The manifest publishes both shapes — bare ids in
+/// older entries and `{id, provides, reason}` objects in newer ones — so decoding
+/// accepts either instead of silently dropping the dependency.
+struct RuntimeRequirement: Codable, Hashable {
+    let id: String
+    let provides: String?
+    let reason: String?
+
+    init(from decoder: Decoder) throws {
+        if let single = try? decoder.singleValueContainer(), let bare = try? single.decode(String.self) {
+            id = bare
+            provides = nil
+            reason = nil
+            return
+        }
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        provides = try? container.decodeIfPresent(String.self, forKey: .provides)
+        reason = try? container.decodeIfPresent(String.self, forKey: .reason)
+    }
+
+    enum CodingKeys: String, CodingKey { case id, provides, reason }
+}
+
 /// One entry of the developer runtime manifest (`runtime-manifest.json`,
 /// schema 4). The manifest is published alongside the runtime tarballs; it is
 /// data only, so adding a runtime never requires a new app build.
@@ -33,7 +57,7 @@ struct RuntimeDescriptor: Codable, Identifiable, Hashable {
     let downloadSize: Int64?
     let unpackedSize: Int64?
     let provides: [String]?
-    let requires: [String]?
+    let requires: [RuntimeRequirement]?
     let recommends: [RuntimeRecommendation]?
     let conflicts: [String]?
     let packageSchemes: [String]?
@@ -42,11 +66,30 @@ struct RuntimeDescriptor: Codable, Identifiable, Hashable {
     let ui: RuntimeUI?
     let assetName: String?
     let runtimeFormat: Int?
+    /// 清单里的 `install` 块：自检三元组、PATH 入口与运行时环境。
+    /// App 自管 handler（codex / theos / python / reverse_tools）不发布这个字段。
+    let install: RuntimeInstallSpec?
 
     struct RuntimeCapability: Codable, Hashable {
         let title: String?
         let summary: String?
         let minVersion: String?
+        /// 跨运行时依赖：`node.native-addon` 需要 theos 的 ios.toolchain 之类。
+        let requires: [RuntimeRequirement]
+
+        enum CodingKeys: String, CodingKey {
+            case title, summary, requires
+            case minVersion = "min_version"
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            title = try? container.decodeIfPresent(String.self, forKey: .title)
+            summary = try? container.decodeIfPresent(String.self, forKey: .summary)
+            minVersion = try? container.decodeIfPresent(String.self, forKey: .minVersion)
+            requires = (try? container.decodeIfPresent([RuntimeRequirement].self,
+                                                       forKey: .requires)) ?? []
+        }
     }
 
     struct RuntimeUI: Codable, Hashable {
@@ -79,7 +122,11 @@ struct RuntimeDescriptor: Codable, Identifiable, Hashable {
         case ui
         case assetName = "asset_name"
         case runtimeFormat = "runtime_format"
+        case install
     }
+
+    /// 没有 `install` 块时返回空规格，调用方不必到处判断可选值。
+    var installSpecOrNone: RuntimeInstallSpec { install ?? .none }
 
     var downloadBytes: Int64 { downloadSize ?? 0 }
     var unpackedBytes: Int64 { unpackedSize ?? 0 }
