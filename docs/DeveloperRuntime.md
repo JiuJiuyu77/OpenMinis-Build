@@ -267,3 +267,62 @@ probe 输出会被截断到 4KB 并写进日志与设置页，便于区分「包
    `sign_paths` 越界、环境值缺 `${RUNTIME_ROOT}`）、摘要为 64 位小写 hex；
 2. **swift-syntax** —— Ubuntu + Swift 6，`swiftc -parse` 解析 Runtime 目录与设置页
    （只校验语法，不需要 iOS SDK），并断言自检与 overlay 仍接在管理器上。
+
+## 三层执行链：shell / 工具链 / 签名（本分支补齐签名层）
+
+要在真机上真正编译并运行原生二进制，三层缺一不可。前两层本分支之前就已经存在，
+这一轮补的是第三层。
+
+| 层 | 组成 | 状态 | 代码位置 |
+|---|---|---|---|
+| 1. 执行层 | `Helpers/bash.real`（真 bash，Darwin syscall + `posix_spawn`），不是 iSH 里的 Linux busybox | 已有（找不到时依次回退 `/var/jb/usr/bin/bash`、`/bin/bash`、`/bin/sh`，并在 `Helpers/`、`TheosCompat/`、`TheosCoreCompat/` 里补 coreutils 别名） | `NativeBuild/NativeToolchain.swift`、`NativeBuild/NativeCommandRunner.swift` |
+| 2. 工具层 | Theos 运行时：`clang-16`、`ld64`、`ar`、`strip`、`ldid`、`dpkg-deb`、`iPhoneOS16.5.sdk`、makefiles/headers/lib | 已有（真机 arm64 编译，不交叉模拟） | `Runtime/DeveloperRuntimeManager.swift`、`NativeBuild/NativeToolchain.swift` |
+| 3. 签名层 | `ldid -S<entitlements>` 写权限 → `codex-sign` 补 App Store 形态 CodeDirectory（TeamID + cdhashes） | **本分支新增** | `Runtime/RuntimeSigning.swift` |
+
+### 为什么必须两步
+
+只做 `ldid` 是「签名残缺」：`posix_spawn` 可能过得去，但一执行就被杀，表现为
+`Bad executable` 或 `Killed: 9` —— AMFI 不认这个签名结构。`codex-sign` 在 adhoc
+签名之上重写签名 superblob：Thin/FAT 归一到 arm64、补 cdhashes、设置 TeamID，并走
+TrollStore 的 CoreTrust 绕过路径。
+
+### 权限来源（不硬编码一份 plist）
+
+`RuntimeSigner.entitlementsPlist()` 从**本进程自身签名**里挑出可传播的这 8 条：
+
+`platform-application`、`com.apple.private.security.no-sandbox`、
+`com.apple.private.security.no-container`、
+`com.apple.private.security.storage.AppBundles`、
+`com.apple.private.security.storage.AppDataContainers`、
+`task_for_pid-allow`、`get-task-allow`、`proc_info-allow`
+
+`Configs/TrollStore.entitlements` 里这些已经都在（另外还有
+`com.apple.private.skip-library-validation`，用于让 dyld 接受 CDHash 与主程序不同的
+运行时二进制）。App 本身不是以这些权限签名时（App Store / 普通侧载），签出来的东西
+也没有意义——signer 直接返回 `skipped`，不会假装成功。
+
+### 装完自动签名
+
+`DeveloperRuntimeManager` 在自检通过后备好 `install.sign_paths`（带权限）与
+`install.sign_paths_without_entitlements`（adhoc-only），逐个：
+
+1. `ldid -S<tmp>/entitlements.plist <file>`
+2. `codex-sign [--entitlements plist] <file>`
+
+结论落在安装记录里（`RuntimeSignReport`），设置页显示 `Signed (ldid + codex-sign)`、
+`Ad-hoc signed only`、`Signing skipped`、`Signing failed` 四种之一。签名失败会让安装
+失败并保留上一份可用的运行时——一个「装了但执行即崩」的工具链比没有更糟。
+
+### 把 bash.real / codex-sign 放进包
+
+`Helpers/` 目前不在 Xcode 工程里，需要一次构建配置（不是代码改动）：
+
+1. 把 `bash.real`、`codex-sign`（可选 `ca-filetool`、`ldid`）放到 `Configs/Helpers/`；
+2. 在 Minis target 里加一个 Run Script 构建阶段（放在签名阶段之前）：
+   `"${SRCROOT}/scripts/stage_app_helpers.sh"`；
+3. 脚本会把文件复制到 `<App>.app/Helpers/`、补 `bash`/`sh`/coreutils 软链，并用当前
+   签名身份对副本做一次 adhoc 签名（`Configs/Helpers/` 为空时整体 no-op，不影响普通构建）。
+
+`codex-sign` 没进包也能跑：signer 会退化成 `Ad-hoc signed only` 并在记录里写明原因；
+也可以把 `codex-sign` 放到 `Application Support/DeveloperRuntime/Helpers/codex-sign`，
+不重新打包即生效。

@@ -52,6 +52,8 @@ struct InstalledRuntimeRecord: Codable, Equatable {
     /// 装完那一刻按清单 `install` 块做的自检结论。
     /// 旧记录没有这个字段（新增为可选），解码时按 nil 处理。
     var verification: RuntimeVerificationReport?
+    /// 装完之后的分发签名结论（ldid → codex-sign）。
+    var signing: RuntimeSignReport?
 }
 
 enum RuntimeInstallState: Equatable {
@@ -220,6 +222,11 @@ final class DeveloperRuntimeManager: ObservableObject {
     /// 安装记录里的自检结论（未装 / 旧记录时为 nil）。
     func verification(for id: String) -> RuntimeVerificationReport? {
         records[id]?.verification
+    }
+
+    /// 安装记录里的签名结论。
+    func signingReport(for id: String) -> RuntimeSignReport? {
+        records[id]?.signing
     }
 
     /// 按 id 取清单条目（含字典键回填的 id）。
@@ -458,6 +465,17 @@ final class DeveloperRuntimeManager: ObservableObject {
                 parts.isEmpty ? AppLocalized("Runtime self-check failed.") : parts.joined(separator: " — "))
         }
 
+        // 3.6 签名：ldid 写 entitlements，再让 codex-sign 补 App Store 形态的
+        // CodeDirectory。运行时里全是 Mach-O，只做 ldid 会在执行时被杀
+        // （Bad executable / Killed: 9）；两者都缺时降级为 adhoc 并在记录里说明。
+        let signing = RuntimeSigner.signRuntime(descriptor: descriptor,
+                                                root: scratch,
+                                                canExecuteNative: hostCanRunNative)
+        guard signing.isAcceptable else {
+            try? fm.removeItem(at: scratch)
+            throw RuntimeInstallError.installFailed(signing.reason ?? AppLocalized("Signing failed."))
+        }
+
         await manager.publish(id, .finalizing)
         let record = InstalledRuntimeRecord(
             id: id,
@@ -468,7 +486,8 @@ final class DeveloperRuntimeManager: ObservableObject {
             sizeBytes: Self.directorySize(scratch),
             sdk: descriptor.sdk,
             provides: descriptor.provides ?? [],
-            verification: verification)
+            verification: verification,
+            signing: signing)
 
         if let metadataURL = descriptor.metadataURL.flatMap(URL.init(string:)) {
             await fetchBundleMetadata(metadataURL, into: scratch)
@@ -506,7 +525,7 @@ final class DeveloperRuntimeManager: ObservableObject {
         // 安装了新运行时（可能就是 OLLVM 前端）后，OLLVM 可用性缓存必须失效，
         // 否则界面会一直显示「缺失」直到杀进程重开。
         await MainActor.run { RuntimeCapabilityNames.refreshOllvmProbe() }
-        logger.notice("Installed runtime \(id) \(descriptor.version) (\(record.sizeBytes) bytes, self-check \(verification.status.rawValue))")
+        logger.notice("Installed runtime \(id) \(descriptor.version) (\(record.sizeBytes) bytes, self-check \(verification.status.rawValue), signing \(signing.status.rawValue))")
     }
 
     // MARK: - Unpacking
