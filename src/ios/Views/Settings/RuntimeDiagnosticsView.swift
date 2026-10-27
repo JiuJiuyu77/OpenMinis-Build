@@ -24,6 +24,7 @@ struct RuntimeDiagnosticsView: View {
             toolchainSection
             ollvmSection
             runtimesSection
+            runtimeHealthSection
             executorSection
         }
         .navigationTitle(Text(verbatim: "运行时诊断"))
@@ -46,6 +47,68 @@ struct RuntimeDiagnosticsView: View {
         NativeToolchain.shared.resetCache()
         ICloudAvailability.resetCache()
         refreshedAt = Date()
+    }
+
+
+    // MARK: - 运行时完整性（损坏 → 只能重装）
+
+    /// 沙盒是独立 chroot：它既看不见设备侧的 DeveloperRuntime 目录，也没有写权限，
+    /// 所以运行时二进制损坏**不可能**在沙盒内修好，只能删掉损坏目录后由 App 重装。
+    /// 这里把损坏项直接列出来，并给一个针对性的清除入口。
+    private var runtimeHealthSection: some View {
+        Section {
+            let damaged = damagedRuntimeBinaries()
+            if damaged.isEmpty {
+                row(title: AppLocalized("Runtime binaries"),
+                    detail: AppLocalized("All present binaries look intact"),
+                    ok: true)
+            } else {
+                ForEach(damaged, id: \.path) { item in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(verbatim: item.path).font(.caption).foregroundStyle(.red)
+                        Text(verbatim: item.reason).font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                Button(role: .destructive) {
+                    for id in Set(damaged.map(\.runtimeID)) {
+                        try? FileManager.default.removeItem(
+                            at: DeveloperRuntimeManager.installDirectory(id: id))
+                    }
+                    recheck()
+                } label: {
+                    Label(AppLocalized("Delete damaged runtimes and reinstall"),
+                          systemImage: "trash")
+                }
+            }
+        } header: {
+            Text(AppLocalized("Runtime integrity"))
+        } footer: {
+            Text(AppLocalized("A truncated binary (e.g. a few dozen bytes) cannot be repaired inside the iSH sandbox — it is an isolated chroot. Deleting it here and reinstalling from the list above is the only fix."))
+        }
+    }
+
+    private struct DamagedRuntimeBinary: Identifiable {
+        let runtimeID: String
+        let path: String
+        let reason: String
+        var id: String { path }
+    }
+
+    private func damagedRuntimeBinaries() -> [DamagedRuntimeBinary] {
+        let rels = ["usr/bin/zsh", "bin/zsh", "usr/bin/bash", "bin/bash",
+                    "usr/bin/make", "usr/bin/clang"]
+        var out: [DamagedRuntimeBinary] = []
+        for id in manager.records.keys.sorted() {
+            let dir = DeveloperRuntimeManager.installDirectory(id: id)
+            for rel in rels {
+                let path = dir.appendingPathComponent(rel).path
+                guard FileManager.default.fileExists(atPath: path) else { continue }
+                if let why = runtimeBinaryDamage(path) {
+                    out.append(DamagedRuntimeBinary(runtimeID: id, path: path, reason: why))
+                }
+            }
+        }
+        return out
     }
 
     // MARK: - 概览
