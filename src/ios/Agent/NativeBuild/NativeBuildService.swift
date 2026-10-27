@@ -438,10 +438,33 @@ final class NativeBuildService: ObservableObject {
         } else if result.ok {
             message = foundMessage
         } else {
-            message = "构建失败（退出码 \(result.exitCode)）"
+            // [T-exit-code] 只报一个数字等于没报。134 = 128+6 = SIGABRT（编译器自己
+            // abort，常见于内存不足或 clang 内部崩溃）；137/139 同理是信号而非普通退出。
+            message = "构建失败（\(Self.explainExitCode(result.exitCode))）"
         }
         return NativeBuildResult(ok: result.ok, exitCode: result.exitCode,
                                  seconds: result.duration, artifacts: artifacts,
                                  log: result.output, message: message)
+    }
+
+    /// 把退出码翻译成人话。负数是我们自己造的语义值，>128 是 shell 的「信号」编码。
+    static func explainExitCode(_ code: Int32) -> String {
+        switch code {
+        case -1:
+            return "退出码 -1 —— 进程根本没起来（工具链/shell 缺失或无法执行）"
+        case 134:
+            return "退出码 134（SIGABRT）—— 编译进程被 abort，常见于内存不足或 clang 内部崩溃"
+        case 137:
+            return "退出码 137（SIGKILL）—— 进程被系统杀掉，通常是内存不足"
+        case 139:
+            return "退出码 139（SIGSEGV）—— 编译器段错误"
+        case 133:
+            return "退出码 133（SIGTRAP）—— 断言失败"
+        default:
+            if code > 128 {
+                return "退出码 \(code)（信号 \(code - 128)）"
+            }
+            return "退出码 \(code)"
+        }
     }
 }
