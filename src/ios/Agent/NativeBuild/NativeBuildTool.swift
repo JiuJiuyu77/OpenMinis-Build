@@ -98,6 +98,7 @@ enum NativeBuildTool {
                 if args["strip_symbols"] == nil { args["strip_symbols"] = saved.stripSymbols }
                 if args["hide_symbols"] == nil { args["hide_symbols"] = saved.hideSymbols }
                 if args["encrypt_strings"] == nil { args["encrypt_strings"] = saved.encryptStrings }
+                if args["make_mode"] == nil { args["make_mode"] = saved.makeMode.rawValue }
             }
         }
 
