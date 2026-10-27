@@ -73,7 +73,32 @@ enum NativeBuildTool {
 
     /// 供 AIChatViewModel+ConcurrentTools 的分发分支调用。
     static func perform(args: [String: Any]) async -> (text: String, ok: Bool) {
-        let path = (args["path"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var path = (args["path"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        // [T-native-build-path] 原生工具链在本进程里 spawn 真实的 clang/ld64/make，
+        // 访问的是**设备真实文件系统**；iSH 沙盒里的 /var/minis/... 在设备侧不可见
+        // （实测：/、/private/var/mobile/Documents、Theos 目录都能认，唯独沙盒路径认不到）。
+        // 这里先尝试把沙盒路径映射成设备路径；映射不到就给一条能照做的指令，
+        // 而不是让调用方只看到一句 "project directory not found"。
+        if path.hasPrefix("/var/minis") {
+            if let mapped = Self.mapSandboxPathToDevice(path) {
+                path = mapped
+            } else {
+                return ("""
+                Error: `\(path)` 是 iSH 沙盒路径，原生工具链看不到它。
+
+                原生编译走的是设备真实文件系统（posix_spawn 真实的 clang/ld64/make），
+                而 /var/minis/... 属于 iSH 的 Linux 根文件系统，设备侧没有这个路径。
+
+                请把工程放到设备侧目录，例如：
+                  /var/mobile/Documents/<项目名>
+
+                需要的话可以先用 shell_execute 复制过去：
+                  cp -a <沙盒内工程路径> /var/mobile/Documents/
+                然后 native_build 传 path=/var/mobile/Documents/<项目名>。
+                """, false)
+            }
+        }
 
         var isDir: ObjCBool = false
         guard !path.isEmpty,
@@ -174,5 +199,20 @@ enum NativeBuildTool {
         lines.append("--- 构建日志（尾部 4000 字）---")
         lines.append(String(result.log.suffix(4000)))
         return (lines.joined(separator: "\n"), result.ok)
+    }
+
+    /// 把 iSH 沙盒路径映射到设备侧真实路径。命中不了就返回 nil，由调用方给指令。
+    /// 只做若干候选前缀的存在性判断——猜错不会有副作用，猜中就直接能用。
+    static func mapSandboxPathToDevice(_ path: String) -> String? {
+        let home = NSHomeDirectory()
+        guard path.hasPrefix("/var/minis") else { return nil }
+        let rel = path.replacingOccurrences(of: "/var/minis/", with: "")
+        let candidates = [
+            "\(home)/Documents/\(rel)",
+            "\(home)/Documents/alpine-rootfs/data/var/minis/\(rel)",
+            "\(home)/Library/Application Support/minis/\(rel)",
+            "/var/mobile/Documents/\(rel)"
+        ]
+        return candidates.first { FileManager.default.fileExists(atPath: $0) }
     }
 }
