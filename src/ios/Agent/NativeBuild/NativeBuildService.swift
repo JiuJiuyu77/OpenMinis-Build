@@ -448,7 +448,7 @@ final class NativeBuildService: ObservableObject {
     }
 
     /// 把退出码翻译成人话。负数是我们自己造的语义值，>128 是 shell 的「信号」编码。
-    static func explainExitCode(_ code: Int32) -> String {
+    nonisolated static func explainExitCode(_ code: Int32) -> String {
         switch code {
         case -1:
             return "退出码 -1 —— 进程根本没起来（工具链/shell 缺失或无法执行）"
