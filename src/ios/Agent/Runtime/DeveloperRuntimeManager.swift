@@ -439,6 +439,9 @@ final class DeveloperRuntimeManager: ObservableObject {
         if hadPrevious { try? fm.removeItem(at: retired) }
 
         await manager.commit(record)
+        // 安装了新运行时（可能就是 OLLVM 前端）后，OLLVM 可用性缓存必须失效，
+        // 否则界面会一直显示「缺失」直到杀进程重开。
+        await MainActor.run { RuntimeCapabilityNames.refreshOllvmProbe() }
         logger.notice("Installed runtime \(id) \(descriptor.version) (\(record.sizeBytes) bytes)")
     }
 
