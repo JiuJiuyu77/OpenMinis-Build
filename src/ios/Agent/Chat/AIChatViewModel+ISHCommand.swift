@@ -48,7 +48,11 @@ extension AIChatViewModel {
                     output: "Error: the native runtime was selected in Settings but no toolchain was found. Install it from Settings → Developer Runtime, or switch the executor back to Automatic.",
                     exitCode: 127)
             }
-            if nativeReady && !command.contains("/var/minis/") {
+            // [T-executor-auto-fix] 以前这里只看 nativeReady：只要设备上探测到
+            // 工具链，auto 模式也会把命令切到原生执行，与上面「auto 默认留在 iSH、
+            // 只有显式勾选自定义 Runtime 才切」的约定相反。沙箱构建里这正是
+            // libiosexec / 134 的来源。改成必须同时满足 wantsNative。
+            if wantsNative && nativeReady && !command.contains("/var/minis/") {
                 // [T-runtime-health] 「文件在」不等于「能跑」。沙箱里运行时自带的
                 // zsh 会死在 dyld（@rpath/libiosexec.1.dylib 被 mmap 拦截），
                 // 子进程 abort → 134；posix_spawn 被拒 → -1。以前只有 -1 才回退，

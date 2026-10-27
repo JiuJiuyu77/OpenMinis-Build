@@ -98,8 +98,11 @@ enum RuntimeRepair {
             if !ToolExecutorPreference.shared.sandboxMode {
                 ToolExecutorPreference.shared.sandboxMode = true
                 steps.append(AppLocalized("Switched the executor to the iSH sandbox so commands keep working."))
-                resolved = true
+            } else {
+                steps.append(AppLocalized("The executor is already the iSH sandbox — commands keep working; the native runtime stays disabled until it can be verified."))
             }
+            // 执行器已经在沙箱时，命令本身是可用的，只是原生编译能力缺失。
+            resolved = true
 
         case .spawnDenied, .dyldBlocked, .crashed, .timedOut, .unknown:
             if !ToolExecutorPreference.shared.sandboxMode {
