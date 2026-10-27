@@ -178,11 +178,7 @@ struct SettingsSheet: View {
                         ModelBuildProfileSettingsView()
                     } label: {
                         Label {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(verbatim: "模型编译配置")
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(.secondary)
-                            }
+                            Text("Model build profiles")
                         } icon: {
                             Image(systemName: "slider.horizontal.3")
                                 .font(.system(size: 9))
@@ -198,11 +194,7 @@ struct SettingsSheet: View {
                         PromptInjectionSettingsView()
                     } label: {
                         Label {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(verbatim: "提示词注入")
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(.secondary)
-                            }
+                            Text("Prompt injection")
                         } icon: {
                             Image(systemName: "text.append")
                                 .font(.system(size: 9))
@@ -273,12 +265,7 @@ struct SettingsSheet: View {
                         BuildWorkbenchView()
                     } label: {
                         Label {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(verbatim: "编译工作台")
-                                Text(verbatim: "编译 tweak / dylib、打壳 ipa、混淆保护")
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(.secondary)
-                            }
+                            Text("Build workbench")
                         } icon: {
                             Image(systemName: "hammer.circle.fill")
                                 .font(.system(size: 9))
@@ -292,7 +279,7 @@ struct SettingsSheet: View {
                         RuntimeDiagnosticsView()
                     } label: {
                         Label {
-                            Text(verbatim: "运行时诊断")
+                            Text("Runtime diagnostics")
                         } icon: {
                             Image(systemName: "stethoscope")
                                 .font(.system(size: 9))
@@ -307,12 +294,7 @@ struct SettingsSheet: View {
                         PluginManagementView()
                     } label: {
                         Label {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(verbatim: "插件管理")
-                                Text(verbatim: "Plugin Management · 精选目录")
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(.secondary)
-                            }
+                            Text("Plugin Management")
                         } icon: {
                             Image(systemName: "puzzlepiece.extension.fill")
                                 .font(.system(size: 9))

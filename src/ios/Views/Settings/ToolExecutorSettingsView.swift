@@ -14,8 +14,11 @@ struct ToolExecutorSettingsView: View {
     @ObservedObject private var preference = ToolExecutorPreference.shared
     @ObservedObject private var capabilities = CapabilityRegistry.shared
     @ObservedObject private var plugins = PluginManifestStore.shared
+    @ObservedObject private var healthMonitor = NativeRuntimeHealthMonitor.shared
     @State private var manualRoot = NativeToolchain.manualRootPath ?? ""
     @State private var showDiagnostics = false
+    @State private var repairing = false
+    @State private var repairReport: RuntimeRepairReport?
 
     var body: some View {
         Form {
@@ -57,6 +60,9 @@ struct ToolExecutorSettingsView: View {
                 Text("Sandbox mode overrides the executor choice. Native execution needs TrollStore or a jailbreak; in an App Store build everything falls back to iSH.")
             }
 
+            environmentSection
+            repairSection
+
             Section {
                 LabeledContent("Effective executor", value: preference.resolvedExecutor.displayName)
                 if preference.sandboxMode {
@@ -95,9 +101,79 @@ struct ToolExecutorSettingsView: View {
         .navigationTitle("Executor")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
+            Task { await healthMonitor.refresh() }
             capabilities.registerBuiltinsIfNeeded()
             plugins.installBundledExamplesIfNeeded()
             plugins.reload()
+        }
+    }
+
+    // MARK: - 环境识别
+
+    /// 一行说清「这台设备能不能原生执行」。放在执行器选择旁边，因为
+    /// 「自动」到底会不会切到原生，取决于这里。
+    private var environmentSection: some View {
+        Section {
+            let host = MinisHostEnvironmentDetector.detect()
+            LabeledContent(AppLocalized("Host environment"), value: host.summary)
+            let health = healthMonitor.health
+            LabeledContent(AppLocalized("Runtime probe"), value: probeStatusText)
+            Text(RuntimeRepair.environmentVerdict(host, health: health))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        } header: {
+            Text(AppLocalized("Environment"))
+        } footer: {
+            Text(AppLocalized("TrollStore and jailbroken installs can run the native toolchain. A sandboxed build cannot load its libraries (libiosexec) — commands then stay in the iSH sandbox, which is expected."))
+        }
+    }
+
+    /// 探针状态的一行文案。单独抽出来，避免嵌套三元在 SwiftUI 的
+    /// ViewBuilder 里被推断成一堆 Optional。
+    private var probeStatusText: String {
+        if healthMonitor.checking { return AppLocalized("Checking…") }
+        guard let health = healthMonitor.health else { return AppLocalized("Not checked yet") }
+        return health.ok ? AppLocalized("Ready") : health.failure.title
+    }
+
+    // MARK: - 一键修复
+
+    private var repairSection: some View {
+        Section {
+            Button {
+                repairing = true
+                Task {
+                    repairReport = await RuntimeRepair.oneClick()
+                    repairing = false
+                    capabilities.refresh()
+                }
+            } label: {
+                Label(AppLocalized("One-tap repair"), systemImage: "wrench.and.screwdriver.fill")
+            }
+            .disabled(repairing)
+            if repairing {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text(AppLocalized("Repairing…")).font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+            if let report = repairReport {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(verbatim: report.title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(report.resolved ? Color.green : Color.orange)
+                    ForEach(Array(report.steps.enumerated()), id: \.offset) { _, step in
+                        Text(verbatim: step)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+        } header: {
+            Text(AppLocalized("Repair"))
+        } footer: {
+            Text(AppLocalized("Clears the cached probe, runs the runtime shell once, and applies the matching fix: a sandbox-blocked runtime is routed to iSH, a missing runtime is reported with the install path."))
         }
     }
 

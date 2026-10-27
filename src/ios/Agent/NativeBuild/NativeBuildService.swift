@@ -289,9 +289,20 @@ final class NativeBuildService: ObservableObject {
 
     var toolchainReady: Bool { NativeToolchain.shared.isAvailable }
 
+    /// 最近一次真实探针的结论（工具链「在」不等于「能跑」）。
+    /// 工作台据此把「一键修复」摆到按钮旁边，而不是等用户编译一次、
+    /// 看到裸的 -1 / 134 再自己猜。
+    @Published private(set) var runtimeHealth: NativeRuntimeHealth?
+
     var artifacts: [String] {
         guard !projectPath.isEmpty else { return [] }
         return NativeToolchain.shared.artifacts(in: projectPath)
+    }
+
+    /// 刷新运行时探针（工作台出现时调用一次，修复后再调用）。
+    func refreshRuntimeHealth() async {
+        let health = await NativeRuntimeHealthMonitor.shared.refresh()
+        runtimeHealth = health
     }
 
     func appendLog(_ line: String) {
@@ -316,11 +327,27 @@ final class NativeBuildService: ObservableObject {
             """)
             return
         }
+        // [T-runtime-health] 文件在 ≠ 能跑：先真跑一次 shell，确认 dyld 能加载
+        // libiosexec。失败时直接给出可执行的修复路径，而不是让用户编译一次、
+        // 拿到一个没有上下文的 -1 / 134。
+        Task { @MainActor in
+            let health = await NativeRuntimeHealthMonitor.shared.refresh()
+            self.runtimeHealth = health
+            if !health.ok {
+                self.appendLog("✗ 原生运行时无法启动：\(health.summary)")
+                self.appendLog("点下方「一键修复」可自动切到 iSH 沙箱并清掉损坏的探测缓存。")
+                return
+            }
+            self.beginBuild(config: self.makeConfig())
+        }
+    }
+
+    /// 真正的构建入口（探针通过后才走到这里）。
+    private func beginBuild(config: NativeBuildConfig) {
         running = true
         logLines.removeAll()
         persist()
 
-        let config = makeConfig()
         Task { @MainActor in
             let result = await NativeBuildService.runBuild(config) { [weak self] line in
                 Task { @MainActor in self?.appendLog(line) }
@@ -410,11 +437,30 @@ final class NativeBuildService: ObservableObject {
             return NativeBuildResult(ok: false, exitCode: -1, seconds: 0, artifacts: [], log: diagLog,
                                      message: "原生工具链不可用（缺少 Theos 运行时或 shell）")
         }
+        // [T-runtime-health] 再探一次：编译往往发生在「找到工具链」很久之后，
+        // 中间可能重装/删过运行时。探针失败时不要硬编，直接把原因和修复方式
+        // 写进日志——这正是以前「退出码 -1 / 134」没有任何上下文的来源。
+        let health = await NativeRuntimeHealthMonitor.shared.refresh()
+        guard health.ok else {
+            let host = MinisHostEnvironmentDetector.detect()
+            let repair = RuntimeRepair.quickFixHint(for: health.failure)
+            let log = """
+            原生运行时无法启动：\(health.failure.title)
+            环境：\(host.summary)
+            Shell：\(health.shell ?? "—")
+            详情：\(health.detail.isEmpty ? "—" : health.detail)
+            修复：\(repair)
+            """
+            return NativeBuildResult(ok: false, exitCode: -1, seconds: 0, artifacts: [],
+                                     log: log,
+                                     message: "原生运行时无法启动（\(health.failure.title)）")
+        }
         let env = toolchain.environment(projectPath: config.projectPath)
         let result = await NativeCommandRunner.run(command: config.command,
                                                    in: config.projectPath,
                                                    environment: env,
                                                    timeout: config.timeout,
+                                                   shellOverride: health.shell,
                                                    onLine: onLine,
                                                    onSpawn: onSpawn)
         let artifacts: [String]
@@ -451,9 +497,9 @@ final class NativeBuildService: ObservableObject {
     nonisolated static func explainExitCode(_ code: Int32) -> String {
         switch code {
         case -1:
-            return "退出码 -1 —— 进程根本没起来（工具链/shell 缺失或无法执行）"
+            return "退出码 -1 —— 进程根本没起来（工具链/shell 缺失、被沙箱拦截，或运行时无法执行）"
         case 134:
-            return "退出码 134（SIGABRT）—— 编译进程被 abort，常见于内存不足或 clang 内部崩溃"
+            return "退出码 134（SIGABRT）—— 进程被 abort；运行时时常见于 dyld 加载不了 libiosexec（沙箱拦截 mmap），编译时也可能是内存不足或 clang 内部崩溃"
         case 137:
             return "退出码 137（SIGKILL）—— 进程被系统杀掉，通常是内存不足"
         case 139:

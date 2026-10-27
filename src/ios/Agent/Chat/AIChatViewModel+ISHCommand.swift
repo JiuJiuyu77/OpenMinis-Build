@@ -48,25 +48,40 @@ extension AIChatViewModel {
                     output: "Error: the native runtime was selected in Settings but no toolchain was found. Install it from Settings → Developer Runtime, or switch the executor back to Automatic.",
                     exitCode: 127)
             }
-            if nativeReady && !command.contains("/var/minis/") {
-                // [T-native-spawn-fallback] The native path can fail for reasons
-                // that are invisible in the return code: the shell exists but its
-                // dyld dependencies do not resolve, or the binary lost its
-                // signature after an adhoc re-sign. Both used to surface as
-                // "无法启动进程（通常是缺少 no-sandbox 权限）" with no fallback,
-                // so every shell command stopped working. Unless the user
-                // explicitly pinned .native (where failing loudly is the point),
-                // degrade to iSH instead of failing the turn.
-                let nativeResult = try await runNatively(command: command,
-                                                         timeout: effectiveTimeout,
-                                                         lineCallback: lineCallback)
-                let spawnFailed = nativeResult.exitCode == -1
-                    && nativeResult.output.contains("Could not start a process")
-                if !spawnFailed || executor == .native {
-                    return nativeResult
+            // [T-executor-auto-fix] 以前这里只看 nativeReady：只要设备上探测到
+            // 工具链，auto 模式也会把命令切到原生执行，与上面「auto 默认留在 iSH、
+            // 只有显式勾选自定义 Runtime 才切」的约定相反。沙箱构建里这正是
+            // libiosexec / 134 的来源。改成必须同时满足 wantsNative。
+            if wantsNative && nativeReady && !command.contains("/var/minis/") {
+                // [T-runtime-health] 「文件在」不等于「能跑」。沙箱里运行时自带的
+                // zsh 会死在 dyld（@rpath/libiosexec.1.dylib 被 mmap 拦截），
+                // 子进程 abort → 134；posix_spawn 被拒 → -1。以前只有 -1 才回退，
+                // 于是 134 会把每条命令都变成一次失败的编译。
+                //
+                // 现在先用真实探针确认运行时可用：不可用且用户没把执行器钉死在
+                // native 时，直接走 iSH，不浪费一次 abort。
+                let health = await NativeRuntimeHealthMonitor.shared.refresh()
+                if !health.ok {
+                    if executor == .native {
+                        return CommandResult(
+                            output: "Error: 原生执行器已选中，但运行时无法启动：\(health.summary)\n修复：设置 → 运行时诊断 → 一键修复，或把执行器切回「自动 / 沙箱 (iSH)」。",
+                            exitCode: 127)
+                    }
+                    logger.warning("[T-runtime-health] native runtime unusable (\(health.failure.rawValue)); using iSH")
+                    lineCallback("⚠️ 原生运行时无法启动（\(health.summary)），已自动改用 iSH 沙箱。可在 设置 → 运行时诊断 点「一键修复」。")
+                } else {
+                    // [T-native-spawn-fallback] 探针通过后仍可能被运行期问题打死
+                    // （签名失效、dylib 半路缺失）。除非用户显式钉了 .native，
+                    // 否则降级到 iSH，而不是让整轮对话失败。
+                    let nativeResult = try await runNatively(command: command,
+                                                             timeout: effectiveTimeout,
+                                                             lineCallback: lineCallback)
+                    if !Self.nativeFailedToStart(nativeResult) || executor == .native {
+                        return nativeResult
+                    }
+                    logger.warning("[T-native-spawn-fallback] native execution failed at startup; falling back to iSH")
+                    lineCallback("⚠️ 原生执行器无法启动进程，已自动回退到 iSH 沙箱。原因见：设置 → 运行时诊断。")
                 }
-                logger.warning("[T-native-spawn-fallback] native spawn failed; falling back to iSH for this command")
-                lineCallback("⚠️ 原生执行器无法启动进程，已自动回退到 iSH 沙箱。原因见：设置 → Agent Runtime → 运行时诊断。")
             }
         }
 
@@ -103,6 +118,19 @@ extension AIChatViewModel {
         return try await runWithReminder(command, sessionId: sid, timeout: effectiveTimeout,
                                          reminder: bashReminder, silentClass: bashism.hasSilent,
                                          lineCallback: lineCallback)
+    }
+
+    /// 原生路径「根本没起来」的判定：spawn 失败（-1）之外，还要覆盖 dyld
+    /// 在子进程里 abort（134）、找不到动态库（libiosexec / Library not loaded）
+    /// 以及 shell 不存在（126/127）这几种「换了环境就一定能跑」的失败。
+    static func nativeFailedToStart(_ result: CommandResult) -> Bool {
+        let lower = result.output.lowercased()
+        if result.exitCode == -1 && lower.contains("could not start a process") { return true }
+        if lower.contains("libiosexec") || lower.contains("library not loaded")
+            || lower.contains("symbol not found") { return true }
+        if result.exitCode == 134 && lower.contains("dyld") { return true }
+        if (result.exitCode == 126 || result.exitCode == 127) && lower.contains("could not start") { return true }
+        return false
     }
 
     /// Executor adapter handing OnDemandBash a way to run guest commands.

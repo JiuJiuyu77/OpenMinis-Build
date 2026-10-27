@@ -14,6 +14,8 @@
 #import <Foundation/Foundation.h>
 #import "NativeOffloadUtils.h"
 #include "kernel/native_offload.h"
+#include <unistd.h>
+#include <string.h>
 
 #if __has_include("Minis-Swift.h")
 #import "Minis-Swift.h"
@@ -41,6 +43,15 @@
                                      actorRaw:(NSString * _Nonnull)actorRaw
                                     sessionId:(NSString * _Nullable)sessionId
                              skipConfirmation:(BOOL)skipConfirmation;
+@end
+
+/// [T-ish-runtime-bridge] Swift 侧的运行时桥（见 RuntimeOffloadBridge.swift）。
+@interface MinisRuntimeOffloadBridge : NSObject
++ (int)runTool:(NSString * _Nonnull)tool
+     arguments:(NSArray<NSString *> * _Nonnull)arguments
+         stdin:(int)stdinFD
+        stdout:(int)stdoutFD
+        stderr:(int)stderrFD;
 @end
 #endif
 
@@ -457,6 +468,43 @@ static int config_handler(int argc, char **argv,
     return NOFF_EXIT_INVALID_ARGS;
 }
 
+// [T-ish-runtime-bridge] `minis-runtime <tool> [args...]`
+//
+// 让 iSH 会话直接调用设备原生运行时工具（Theos 的 make / clang / ld64 /
+// ldid / dpkg-deb）。这些是 Mach-O，Alpine 里跑不了；以前只能整条命令切到
+// 原生执行器，而沙箱里那条路会死在 libiosexec。走 offload 后 guest 只负责
+// 转发参数和 stdio，真正的进程由 App 侧启动，输出照常回到终端。
+static int minis_runtime_handler(int argc, char **argv,
+                                 int stdin_fd, int stdout_fd, int stderr_fd) {
+    if (argc < 2) {
+        const char *usage =
+            "minis-runtime — 在 iSH 里直接调用设备原生运行时工具\n"
+            "\n"
+            "用法:\n"
+            "  minis-runtime <tool> [args...]\n"
+            "\n"
+            "示例:\n"
+            "  minis-runtime make package\n"
+            "  minis-runtime clang -c foo.m\n"
+            "  minis-runtime ldid -S app\n"
+            "\n"
+            "可用工具取决于 设置 → Developer Runtime 里安装的运行时。\n";
+        if (stderr_fd >= 0) { (void)!write(stderr_fd, usage, strlen(usage)); }
+        return 2;
+    }
+    NSString *tool = [NSString stringWithUTF8String:argv[1]] ?: @"";
+    NSMutableArray<NSString *> *args = [NSMutableArray arrayWithCapacity:(NSUInteger)(argc - 2)];
+    for (int i = 2; i < argc; i++) {
+        NSString *arg = [NSString stringWithUTF8String:argv[i]];
+        [args addObject:arg ?: @""];
+    }
+    return (int)[MinisRuntimeOffloadBridge runTool:tool
+                                         arguments:args
+                                             stdin:stdin_fd
+                                            stdout:stdout_fd
+                                            stderr:stderr_fd];
+}
+
 void config_offload_register(void) {
     int err = native_offload_add_handler("minis-config", config_handler);
     if (err == 0) {
@@ -464,5 +512,14 @@ void config_offload_register(void) {
         NSLog(@"NativeOffloads: minis-config handler registered");
     } else {
         NSLog(@"NativeOffloads: failed to register minis-config handler (err=%d)", err);
+    }
+
+    // [T-ish-runtime-bridge] 运行时工具桥。注册失败不影响 App 其它功能。
+    int runtimeErr = native_offload_add_handler("minis-runtime", minis_runtime_handler);
+    if (runtimeErr == 0) {
+        noff_ensure_guest_stub("/usr/local/bin/minis-runtime");
+        NSLog(@"NativeOffloads: minis-runtime handler registered");
+    } else {
+        NSLog(@"NativeOffloads: failed to register minis-runtime handler (err=%d)", runtimeErr);
     }
 }

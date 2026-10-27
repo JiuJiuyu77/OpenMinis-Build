@@ -15,12 +15,17 @@ struct RuntimeDiagnosticsView: View {
 
     @ObservedObject private var manager = DeveloperRuntimeManager.shared
     @ObservedObject private var preference = ToolExecutorPreference.shared
+    @ObservedObject private var healthMonitor = NativeRuntimeHealthMonitor.shared
     @State private var manualRoot = NativeToolchain.manualRootPath ?? ""
     @State private var refreshedAt = Date()
+    @State private var repairing = false
+    @State private var repairReport: RuntimeRepairReport?
 
     var body: some View {
         Form {
             summarySection
+            environmentSection
+            repairSection
             toolchainSection
             ollvmSection
             runtimesSection
@@ -40,13 +45,91 @@ struct RuntimeDiagnosticsView: View {
         }
         .onAppear {
             Task { await manager.loadManifestIfNeeded() }
+            Task { await healthMonitor.refresh() }
         }
     }
 
     private func recheck() {
         NativeToolchain.shared.resetCache()
+        NativeRuntimeHealthMonitor.shared.invalidate()
         ICloudAvailability.resetCache()
         refreshedAt = Date()
+        Task { await healthMonitor.refresh(force: true) }
+    }
+
+    // MARK: - 环境识别（巨魔 / 越狱 / 沙箱）
+
+    /// 回答「这台设备到底能不能跑原生二进制」。以前只显示「工具链找到没」，
+    /// 于是沙箱构建里明明看得见 MT 的 TheosRuntime、却每条命令都死在
+    /// libiosexec 上，诊断页还是一片绿。
+    private var environmentSection: some View {
+        Section {
+            let host = MinisHostEnvironmentDetector.detect()
+            row(title: AppLocalized("Host environment"),
+                detail: host.summary,
+                ok: host.environment.canRunNativeBinaries && !host.sandboxed)
+            ForEach(Array(host.evidence.enumerated()), id: \.offset) { _, line in
+                Text(verbatim: line)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+            let health = healthMonitor.health
+            row(title: AppLocalized("Startup probe"),
+                detail: healthMonitor.checking
+                    ? AppLocalized("Checking…")
+                    : (health?.summary ?? AppLocalized("Not checked yet")),
+                ok: health?.ok ?? false)
+            Text(RuntimeRepair.environmentVerdict(host, health: health))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } header: {
+            Text(verbatim: "环境识别")
+        } footer: {
+            Text(verbatim: "判断依据是真实写入权限与一次真实 spawn，不是只看文件在不在。普通侧载 / App Store 构建即使能看到 Theos 运行时，也会卡在 libiosexec，这时命令应全部留在 iSH 沙箱。")
+        }
+    }
+
+    // MARK: - 一键修复
+
+    private var repairSection: some View {
+        Section {
+            Button {
+                repairing = true
+                Task {
+                    let report = await RuntimeRepair.oneClick()
+                    repairReport = report
+                    repairing = false
+                    recheck()
+                }
+            } label: {
+                Label(AppLocalized("One-tap repair"), systemImage: "wrench.and.screwdriver.fill")
+            }
+            .disabled(repairing)
+            if repairing {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text(AppLocalized("Repairing…")).font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+            if let report = repairReport {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(verbatim: report.title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(report.resolved ? Color.green : Color.orange)
+                    ForEach(Array(report.steps.enumerated()), id: \.offset) { _, step in
+                        Text(verbatim: step)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+        } header: {
+            Text(verbatim: "一键修复")
+        } footer: {
+            Text(verbatim: "清缓存 → 重新探针 → 按失败类型处理：libiosexec / 沙箱拦截会直接切回 iSH 沙箱并说明原因；运行时损坏会在上面的列表里标出并可删除后重装。")
+        }
     }
 
 

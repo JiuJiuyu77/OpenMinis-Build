@@ -85,6 +85,7 @@ enum NativeCommandRunner {
                     in directory: String?,
                     environment: [String: String],
                     timeout: TimeInterval,
+                    shellOverride: String? = nil,
                     onLine: ((String) -> Void)? = nil,
                     onSpawn: ((pid_t) -> Void)? = nil) async -> Result {
         let started = Date()
@@ -137,7 +138,10 @@ enum NativeCommandRunner {
         var spawnFailures: [(shell: String, code: Int32)] = []
         var spawnedPid: pid_t = -1
         var readFD: Int32 = -1
-        for shell in shellCandidates() {
+        // [T-runtime-shell-override] 探针挑中的那个 shell 直接指定，避免每条命令
+        // 都从 zsh 重新踩一次 libiosexec；没有指定时保持原来的「逐个候选」行为。
+        let shells = shellOverride.map { [$0] } ?? shellCandidates()
+        for shell in shells {
             guard FileManager.default.isExecutableFile(atPath: shell) else { continue }
             var outPipe: [Int32] = [-1, -1]
             guard pipe(&outPipe) == 0 else {
@@ -187,7 +191,7 @@ enum NativeCommandRunner {
         guard spawnedPid > 0 else {
             let detail = describeSpawnFailure(lastErrno)
             // 逐条给出每个候选的真实结局：失败原因 / 未尝试 / 不可执行。
-            let tried = shellCandidates().map { path -> String in
+            let tried = shells.map { path -> String in
                 if let failure = spawnFailures.first(where: { $0.shell == path }) {
                     return "\(path) → \(describeSpawnFailure(failure.code))\n      \(diagnoseExecutable(path))"
                 }

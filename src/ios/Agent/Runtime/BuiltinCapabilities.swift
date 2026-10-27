@@ -85,6 +85,12 @@ struct BuiltinCapabilities: CapabilityProviding {
                                 provider: provider)
             }
             if NativeToolchain.shared.isAvailable {
+                // [T-runtime-health] 「找到工具链」不等于「能启动」：沙箱构建里
+                // 运行时文件看得见，但 shell 会死在 dyld（libiosexec），能力页
+                // 以前却显示可用，用户只能等编译时拿一个 134。
+                if let health = NativeRuntimeHealthMonitor.shared.health, !health.ok {
+                    return .blocked(id, reason: health.summary, provider: provider)
+                }
                 return .ok(id, provider: provider)
             }
             return .missing(id,

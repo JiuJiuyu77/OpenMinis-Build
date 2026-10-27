@@ -33,6 +33,9 @@ struct BuildWorkbenchView: View {
         }
         .navigationTitle(Text(verbatim: "编译工作台"))
         .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await service.refreshRuntimeHealth()
+        }
         .sheet(isPresented: $showPicker) {
             FolderPickerView { url in
                 _ = url.startAccessingSecurityScopedResource()
@@ -74,6 +77,40 @@ struct BuildWorkbenchView: View {
                 }
             } footer: {
                 Text(AppLocalized("Toolchain detection, per-item diagnostics and the manual Theos root all live in Settings → Agent Runtime → Runtime diagnostics. Re-run detection there; this workbench no longer carries a second copy."))
+            }
+        } else if let health = service.runtimeHealth, !health.ok {
+            // [T-workbench-repair] 工具链「在」但跑不起来（典型：沙箱里 libiosexec
+            // 被拦，spawn 直接 134 / -1）。这里不再让用户先编译一次看错误码，
+            // 直接摆出原因和一键修复。
+            Section {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(verbatim: health.failure.title)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.orange)
+                    Text(verbatim: health.summary)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+                Button {
+                    Task {
+                        let report = await RuntimeRepair.oneClick()
+                        service.appendLog(report.title)
+                        for step in report.steps { service.appendLog("· " + step) }
+                        await service.refreshRuntimeHealth()
+                    }
+                } label: {
+                    Label(AppLocalized("One-tap repair"), systemImage: "wrench.and.screwdriver.fill")
+                }
+                NavigationLink {
+                    RuntimeDiagnosticsView()
+                } label: {
+                    Text(AppLocalized("Open Runtime diagnostics"))
+                }
+            } header: {
+                Text(AppLocalized("Runtime"))
+            } footer: {
+                Text(AppLocalized("The runtime files exist but the shell cannot start. One-tap repair switches the executor to the iSH sandbox and clears the cached probe; compiling still needs a TrollStore or jailbroken install."))
             }
         }
     }
