@@ -371,7 +371,14 @@ final class NativeBuildService: ObservableObject {
                                      onSpawn: ((pid_t) -> Void)? = nil) async -> NativeBuildResult {
         let toolchain = NativeToolchain.shared
         guard toolchain.isAvailable else {
-            return NativeBuildResult(ok: false, exitCode: -1, seconds: 0, artifacts: [], log: "",
+            // [T-build-exit-minus1] 以前这里返回 log: ""，工具结果只剩「退出码 -1」，
+            // 完全看不出是没装运行时、路径不对，还是只缺一个 shell。把逐项诊断塞进日志。
+            let diag = toolchain.diagnostics()
+            let diagLog = (["原生工具链不可用：逐项诊断",
+                            diag.suggestedRoot.map { "建议根目录：\($0)" } ?? "未找到可用的 Theos 根目录"]
+                           + diag.lines.map { "  \($0.ok ? "✓" : "✗") \($0.title)：\($0.detail)" })
+                .joined(separator: "\n")
+            return NativeBuildResult(ok: false, exitCode: -1, seconds: 0, artifacts: [], log: diagLog,
                                      message: "原生工具链不可用（缺少 Theos 运行时或 shell）")
         }
         let env = toolchain.environment(projectPath: config.projectPath)
