@@ -37,6 +37,15 @@ enum NativeCommandRunner {
             return "posix_spawn E2BIG — the environment is too large (too many / too long env vars)."
         case ENOMEM:
             return "posix_spawn ENOMEM — out of memory while forking. Close other apps and retry."
+        // 8 ENOEXEC / 85 EBADEXEC / 86 EBADARCH / 87 ESHLIBVERS / 88 EBADMACHO
+        // iOS 上这几个基本只有三种成因：二进制没签名（amfid 拒），依赖的 dylib
+        // 解析不到（dyld 打死子进程），或者架构/文件本身坏了。以前它们全落到
+        // default 分支，只显示 "Bad executable"，等于什么都没说。
+        case 8, 85, 86, 87, 88:
+            return "posix_spawn EBADEXEC — 内核或 dyld 拒绝执行这个二进制。三种常见成因：\n"
+                + "        1) 二进制没有有效代码签名（TrollStore 下需要 adhoc/ldid 重签）\n"
+                + "        2) 它依赖的 dylib 找不到（Theos 运行时的 usr/lib 不在搜索路径里）\n"
+                + "        3) 架构不符或文件下载不完整"
         case 0:
             return "posix_spawn succeeded but returned no pid."
         default:
@@ -84,6 +93,30 @@ enum NativeCommandRunner {
         }
 
         var envPairs: [String] = []
+        // [T-exec-dyld-path] Theos 运行时把 zsh 依赖的 dylib 放在自己的 usr/lib，
+        // 而二进制里记的往往是构建机上的 @rpath。补上 DYLD 回退路径，能直接救回
+        // 「库其实在、只是找不到」这一类 EBADEXEC，不必让用户手工 export。
+        var environment = environment
+        do {
+            var dirs: [String] = []
+            for shell in shellCandidates() {
+                let bin = (shell as NSString).deletingLastPathComponent
+                let prefix = (bin as NSString).deletingLastPathComponent
+                let root = (prefix as NSString).deletingLastPathComponent
+                if !bin.isEmpty { dirs.append(bin) }
+                if !prefix.isEmpty { dirs.append("\(prefix)/lib") }
+                if !root.isEmpty { dirs.append("\(root)/lib") }
+            }
+            let joined = dirs.joined(separator: ":")
+            if !joined.isEmpty {
+                if let existing = environment["DYLD_FALLBACK_LIBRARY_PATH"], !existing.isEmpty {
+                    environment["DYLD_FALLBACK_LIBRARY_PATH"] = "\(existing):\(joined)"
+                } else {
+                    environment["DYLD_FALLBACK_LIBRARY_PATH"] = joined
+                }
+            }
+        }
+
         for (key, value) in environment where !key.contains("=") {
             envPairs.append("\(key)=\(value)")
         }
@@ -153,7 +186,7 @@ enum NativeCommandRunner {
             // 逐条给出每个候选的真实结局：失败原因 / 未尝试 / 不可执行。
             let tried = shellCandidates().map { path -> String in
                 if let failure = spawnFailures.first(where: { $0.shell == path }) {
-                    return "\(path) → \(describeSpawnFailure(failure.code))"
+                    return "\(path) → \(describeSpawnFailure(failure.code))\n      \(diagnoseExecutable(path))"
                 }
                 if FileManager.default.isExecutableFile(atPath: path) {
                     return "\(path) → not attempted"
@@ -290,5 +323,55 @@ private final class LineCollector {
     var text: String {
         lock.lock(); defer { lock.unlock() }
         return all
+    }
+
+    /// 读 Mach-O 头，回答「这个文件到底是什么」：架构、有没有代码签名、多大。
+    /// EBADEXEC 时把这三种成因区分开——「未签名」要重签，「缺 dylib」要补路径，
+    /// 两者解法完全不同，混在一起只会让人乱试。
+    static func diagnoseExecutable(_ path: String) -> String {
+        let fm = FileManager.default
+        guard let attrs = try? fm.attributesOfItem(atPath: path) else {
+            return "诊断：文件不存在"
+        }
+        let size = (attrs[.size] as? Int) ?? 0
+        var notes: [String] = ["\(size) 字节", fm.isExecutableFile(atPath: path) ? "有执行位" : "缺执行位"]
+        guard let fh = FileHandle(forReadingAtPath: path) else {
+            return "诊断：" + notes.joined(separator: "、")
+        }
+        defer { try? fh.close() }
+        let head = [UInt8](fh.readData(ofLength: 65536))
+        guard head.count >= 32 else {
+            return "诊断：" + notes.joined(separator: "、") + "、文件过短（可能下载不完整）"
+        }
+        func u32(_ o: Int) -> UInt32 {
+            guard o + 3 < head.count else { return 0 }
+            return UInt32(head[o]) | (UInt32(head[o + 1]) << 8)
+                | (UInt32(head[o + 2]) << 16) | (UInt32(head[o + 3]) << 24)
+        }
+        let magic = u32(0)
+        guard magic == 0xFEED_FACF || magic == 0xFEED_FACE || magic == 0xCAFE_BABE else {
+            notes.append("不是 Mach-O（magic 0x" + String(magic, radix: 16) + "）")
+            return "诊断：" + notes.joined(separator: "、")
+        }
+        let cpu = u32(4)
+        switch cpu {
+        case 0x0100_000C: notes.append("arm64")
+        case 0x0100_0007: notes.append("x86_64（架构不符）")
+        case 0x0000_000C: notes.append("armv7（架构不符）")
+        default: notes.append("cpu 0x" + String(cpu, radix: 16))
+        }
+        let ncmds = Int(u32(16))
+        var idx = 32
+        var hasSignature = false
+        for _ in 0..<max(0, ncmds) {
+            guard idx + 8 <= head.count else { break }
+            let cmd = u32(idx)
+            let cmdsize = Int(u32(idx + 4))
+            if cmd == 0x1D { hasSignature = true; break }
+            if cmdsize <= 0 { break }
+            idx += cmdsize
+        }
+        notes.append(hasSignature ? "带代码签名" : "无代码签名（需要 ldid 重签）")
+        return "诊断：" + notes.joined(separator: "、")
     }
 }
