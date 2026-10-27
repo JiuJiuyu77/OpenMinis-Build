@@ -22,6 +22,7 @@ struct BuildWorkbenchView: View {
         Form {
             toolchainNotice
             buildProfileSection
+            makeModeSection
             projectSection
             productSection
             configSection
@@ -76,6 +77,25 @@ struct BuildWorkbenchView: View {
             } footer: {
                 Text(AppLocalized("Toolchain detection, per-item diagnostics and the manual Theos root all live in Settings → Agent Runtime → Runtime diagnostics. Re-run detection there; this workbench no longer carries a second copy."))
             }
+        }
+    }
+
+    // MARK: - 构建方式（Makefile）
+
+    /// 以前这里隐含要求「工程根目录必须有手写 Makefile」，没有就直接失败，
+    /// 用户只看到一句「构建失败 / -1」。现在把三种来源摊开给用户选。
+    private var makeModeSection: some View {
+        Section {
+            Picker(selection: $service.makeMode) {
+                ForEach(NativeMakeMode.allCases) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            } label: {
+                Text(AppLocalized("Build file"))
+            }
+            .pickerStyle(.menu)
+        } footer: {
+            Text(service.makeMode.detail)
         }
     }
 
