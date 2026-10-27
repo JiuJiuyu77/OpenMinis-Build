@@ -34,10 +34,29 @@ enum RuntimeCapabilityNames {
         DeveloperRuntimeManager.shared.installedCapabilities
     }
 
-    /// OLLVM 是否可用。任何别名命中都算。
+    /// OLLVM 是否可用。
+    ///
+    /// [T-ollvm-detect] 只看 manifest 声明会误报「缺失」：运行时的 manifest 里可能
+    /// 根本没写 `compiler.ollvm.*`（OLLVM 前端是塞在 Theos 运行时的 usr/bin 里的），
+    /// 于是装好了也显示未安装。所以声明没命中时，再问一次工具链本身——能找到一个
+    /// 支持 `-mllvm` 的 clang，就算 OLLVM 真的可用。
+    ///
+    /// 探测要扫目录、读二进制头，不能放在 SwiftUI body 里每次渲染都做，因此缓存；
+    /// 安装/卸载运行时后调用 `refreshOllvmProbe()` 让它失效。
+    private static var ollvmProbeCache: Bool?
+
+    @MainActor
+    static func refreshOllvmProbe() {
+        ollvmProbeCache = nil
+    }
+
     @MainActor
     static var ollvmInstalled: Bool {
-        !installed.isDisjoint(with: ollvmAliases)
+        if !installed.isDisjoint(with: ollvmAliases) { return true }
+        if let cached = ollvmProbeCache { return cached }
+        let probed = NativeToolchain.shared.findObfuscatingClang() != nil
+        ollvmProbeCache = probed
+        return probed
     }
 
     /// Theos 工具链是否由 Developer Runtime 安装（不代表探测成功）。
