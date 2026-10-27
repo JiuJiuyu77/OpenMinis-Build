@@ -72,7 +72,7 @@ struct RuntimeDiagnosticsView: View {
                 Button(role: .destructive) {
                     for id in Set(damaged.map(\.runtimeID)) {
                         try? FileManager.default.removeItem(
-                            at: DeveloperRuntimeManager.installDirectory(id: id))
+                            at: DeveloperRuntimePaths.installDirectory(id: id))
                     }
                     recheck()
                 } label: {
@@ -99,7 +99,7 @@ struct RuntimeDiagnosticsView: View {
                     "usr/bin/make", "usr/bin/clang"]
         var out: [DamagedRuntimeBinary] = []
         for id in manager.records.keys.sorted() {
-            let dir = DeveloperRuntimeManager.installDirectory(id: id)
+            let dir = DeveloperRuntimePaths.installDirectory(id: id)
             for rel in rels {
                 let path = dir.appendingPathComponent(rel).path
                 guard FileManager.default.fileExists(atPath: path) else { continue }
