@@ -139,9 +139,10 @@ enum NativeBuildTool {
         guard toolchain.isAvailable else {
             return ("""
             Error: native toolchain unavailable.
-            No usable Theos runtime / shell was found. The user must download the runtime first \
-            (Editor: Settings › Agent Tools › 编译工作台 → 下载运行时), or install the runtime into \
-            Library/Application Support/NativeToolchain.
+            No usable Theos runtime / shell was found. Install it from Settings → Developer Runtime, \
+            or point Settings → Executor → Toolchain diagnostics at an existing Theos root.
+            In a sandboxed install the native runtime cannot run at all — commands stay in iSH; \
+            Settings → Runtime diagnostics → One-tap repair switches the executor and explains why.
             Runtime roots searched:
             \(NativeToolchain.candidateRoots().prefix(8).map { "  " + $0.path }.joined(separator: "\n"))
             Fix without a rebuild: Settings → Executor → Toolchain diagnostics → set the Theos root manually.
