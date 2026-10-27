@@ -117,10 +117,7 @@ struct ToolExecutorSettingsView: View {
             let host = MinisHostEnvironmentDetector.detect()
             LabeledContent(AppLocalized("Host environment"), value: host.summary)
             let health = healthMonitor.health
-            LabeledContent(AppLocalized("Runtime probe"),
-                           value: healthMonitor.checking
-                               ? AppLocalized("Checking…")
-                               : (health?.ok == true ? AppLocalized("Ready") : (health?.failure.title ?? AppLocalized("Not checked yet"))))
+            LabeledContent(AppLocalized("Runtime probe"), value: probeStatusText)
             Text(RuntimeRepair.environmentVerdict(host, health: health))
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -129,6 +126,14 @@ struct ToolExecutorSettingsView: View {
         } footer: {
             Text(AppLocalized("TrollStore and jailbroken installs can run the native toolchain. A sandboxed build cannot load its libraries (libiosexec) — commands then stay in the iSH sandbox, which is expected."))
         }
+    }
+
+    /// 探针状态的一行文案。单独抽出来，避免嵌套三元在 SwiftUI 的
+    /// ViewBuilder 里被推断成一堆 Optional。
+    private var probeStatusText: String {
+        if healthMonitor.checking { return AppLocalized("Checking…") }
+        guard let health = healthMonitor.health else { return AppLocalized("Not checked yet") }
+        return health.ok ? AppLocalized("Ready") : health.failure.title
     }
 
     // MARK: - 一键修复

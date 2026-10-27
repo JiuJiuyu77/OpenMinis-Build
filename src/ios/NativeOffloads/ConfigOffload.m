@@ -14,6 +14,8 @@
 #import <Foundation/Foundation.h>
 #import "NativeOffloadUtils.h"
 #include "kernel/native_offload.h"
+#include <unistd.h>
+#include <string.h>
 
 #if __has_include("Minis-Swift.h")
 #import "Minis-Swift.h"

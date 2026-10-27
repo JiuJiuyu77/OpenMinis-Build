@@ -260,7 +260,9 @@ final class NativeRuntimeHealthMonitor: ObservableObject {
 
         let env = toolchain.environment()
         var firstFailure: NativeRuntimeHealth?
-        for candidate in NativeCommandRunner.shellCandidates() {
+        // 最多试 5 个候选：每个 8 秒超时，12 个候选会把首屏拖到一分半。
+        // 正常情况下第一个（运行时自带 shell）就会给出结论。
+        for candidate in NativeCommandRunner.shellCandidates().prefix(5) {
             let result = await NativeCommandRunner.run(command: "printf MINIS_RUNTIME_OK",
                                                        in: NSTemporaryDirectory(),
                                                        environment: env,
