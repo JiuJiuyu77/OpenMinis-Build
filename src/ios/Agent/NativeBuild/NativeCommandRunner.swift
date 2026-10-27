@@ -45,7 +45,10 @@ enum NativeCommandRunner {
             return "posix_spawn EBADEXEC — 内核或 dyld 拒绝执行这个二进制。三种常见成因：\n"
                 + "        1) 二进制没有有效代码签名（TrollStore 下需要 adhoc/ldid 重签）\n"
                 + "        2) 它依赖的 dylib 找不到（Theos 运行时的 usr/lib 不在搜索路径里）\n"
-                + "        3) 架构不符或文件下载不完整"
+                + "        3) 架构不符或文件下载不完整\n"
+                + "        注意：如果诊断显示文件只有几十字节（截断的残骸），那就是运行时损坏，\n"
+                + "        沙盒是独立 chroot，既看不见设备侧的运行时目录也没有写权限，无法就地重建；\n"
+                + "        必须到 设置 → 运行时诊断 重装该运行时。"
         case 0:
             return "posix_spawn succeeded but returned no pid."
         default:
