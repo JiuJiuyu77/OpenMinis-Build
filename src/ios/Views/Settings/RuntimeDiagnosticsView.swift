@@ -20,6 +20,7 @@ struct RuntimeDiagnosticsView: View {
     @State private var refreshedAt = Date()
     @State private var repairing = false
     @State private var repairReport: RuntimeRepairReport?
+    @State private var manifestURLText = RuntimeManifestLoader.overrideURLString
 
     var body: some View {
         Form {
@@ -300,10 +301,36 @@ struct RuntimeDiagnosticsView: View {
                 Label("Refresh manifest", systemImage: "arrow.triangle.2.circlepath")
             }
             .disabled(manager.isLoadingManifest)
+
+            // [T-runtime-repo] 运行时下载仓库可换：默认 JiuJiuyu77/CodexApp-Runtime，
+            // 也可以填任意镜像/自建仓库，不需要重新编译。
+            TextField("Runtime manifest URL", text: $manifestURLText)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .font(.system(size: 10, design: .monospaced))
+            HStack {
+                Button("Apply manifest URL") {
+                    RuntimeManifestLoader.setOverrideURL(manifestURLText)
+                    manifestURLText = RuntimeManifestLoader.overrideURLString
+                    Task { await manager.refreshManifest() }
+                }
+                .disabled(manifestURLText.trimmingCharacters(in: .whitespaces).isEmpty)
+                Button("Reset", role: .destructive) {
+                    manifestURLText = ""
+                    RuntimeManifestLoader.setOverrideURL("")
+                    Task { await manager.refreshManifest() }
+                }
+            }
+            .font(.footnote)
+            if let error = manager.manifestError {
+                Text(verbatim: error)
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
         } header: {
             Text(verbatim: "运行时清单")
         } footer: {
-            Text(verbatim: "安装/更新/移除在 设置 → Developer Runtime 里操作。这里只读，用来确认状态。")
+            Text(verbatim: "默认来源：JiuJiuyu77/CodexApp-Runtime。安装/更新/移除在 设置 → Developer Runtime 里操作；这里可换清单地址并确认状态。")
         }
     }
 

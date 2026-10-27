@@ -57,6 +57,7 @@ final class ToolExecutorPreference: ObservableObject {
         static let mode = "toolExecutor.mode"
         static let preferCustomRuntime = "toolExecutor.preferCustomRuntime"
         static let sandboxMode = "toolExecutor.sandboxMode"
+        static let reuseExternalRuntime = "nativeToolchain.reuseExternalRuntime"
     }
 
     @Published var mode: ToolExecutorMode {
@@ -86,6 +87,18 @@ final class ToolExecutorPreference: ObservableObject {
         }
     }
 
+    /// 是否复用 MT-Agent / CodexApp 目录里的运行时。
+    ///
+    /// 默认关闭：那不是本 App 安装的 Theos。在沙箱构建里它既加载不了自己的
+    /// 动态库（libiosexec 被 mmap 拦截），又会让「没装 Theos」在诊断页显示成
+    /// 「已就绪」——两条都会把用户带进错误的方向。
+    @Published var reuseExternalRuntime: Bool {
+        didSet {
+            defaults.set(reuseExternalRuntime, forKey: Key.reuseExternalRuntime)
+            NativeToolchain.shared.resetCache()
+        }
+    }
+
     private let defaults: UserDefaults
 
     /// `defaults` 可注入，便于单元测试用独立的 suite。
@@ -95,12 +108,19 @@ final class ToolExecutorPreference: ObservableObject {
         self.mode = ToolExecutorMode(rawValue: raw) ?? .auto
         self.preferCustomRuntime = defaults.bool(forKey: Key.preferCustomRuntime)
         self.sandboxMode = defaults.bool(forKey: Key.sandboxMode)
+        self.reuseExternalRuntime = defaults.bool(forKey: Key.reuseExternalRuntime)
     }
 
     /// 实际应当使用的执行器。把三个开关收敛成一个决定，
     /// 让调用方（shell_execute / 编译工具）不必各自重复这套规则。
     var resolvedExecutor: ToolExecutorMode {
         if sandboxMode { return .sandbox }
+        // 「自动」在不可能原生执行的环境里直接落到沙箱：否则探到一份外部
+        // 运行时就会把每条命令送去 dyld 里 abort（libiosexec / 134）。
+        if mode == .auto,
+           !MinisHostEnvironmentDetector.cached.environment.canRunNativeBinaries {
+            return .sandbox
+        }
         return mode
     }
 
@@ -112,6 +132,11 @@ final class ToolExecutorPreference: ObservableObject {
     /// 用户是否要求“自定义 Runtime 优先”。
     var customRuntimePreferred: Bool {
         preferCustomRuntime && !sandboxMode
+    }
+
+    /// 允许扫描其它 App 的运行时目录（MT-Agent / CodexApp）。
+    var externalRuntimeAllowed: Bool {
+        reuseExternalRuntime && !sandboxMode
     }
 
     /// 一次性把三个开关收敛成“这次命令该怎么跑”，供非主线程的调用方

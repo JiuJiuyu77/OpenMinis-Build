@@ -3,11 +3,11 @@
 //  Minis — 运行时故障的「针对性一键修复」
 //
 //  设计原则：运行时报错不静默吞掉，也不把用户卡死在一个裸错误码上。
-//  每一类失败都有一个确定的、可执行的修复动作：
+//  每一类失败都有确定的、可执行的修复动作：
 //    · 工具链不存在        → 引导安装（不假装能修）
 //    · shell 缺失/损坏     → 重装运行时
-//    · libiosexec/沙箱拦截 → 自动切回 iSH 沙箱（命令立刻恢复可用），
-//                            同时清掉探测缓存，等用户装好巨魔/越狱版再自动切回
+//    · libiosexec/沙箱拦截 → ① 先把外部运行时复制进 App 容器再试（真正的修好）
+//                            ② 仍不行就切回 iSH 沙箱（命令立刻可用）
 //    · 探针超时 / 未知     → 清缓存重测一次，仍失败则切沙箱兜底
 //
 
@@ -35,7 +35,7 @@ enum RuntimeRepair {
         case .shellMissing:
             return AppLocalized("Reinstall the Theos runtime — it has no usable shell inside.")
         case .spawnDenied, .dyldBlocked, .crashed, .timedOut, .unknown:
-            return AppLocalized("Open Settings → Runtime diagnostics and tap One-tap repair: it switches the executor to the iSH sandbox and clears the cached probe.")
+            return AppLocalized("Open Settings → Runtime diagnostics and tap One-tap repair: it copies the runtime into the app container, then switches to the iSH sandbox if native execution is still impossible.")
         }
     }
 
@@ -46,21 +46,67 @@ enum RuntimeRepair {
             return AppLocalized("Native runtime verified — commands can run natively.")
         }
         if !report.environment.canRunNativeBinaries || report.sandboxed {
-            return AppLocalized("This build runs inside the app sandbox, so the native runtime cannot load its own libraries (libiosexec). Everything is routed to the iSH sandbox.")
+            return AppLocalized("Neither TrollStore nor a jailbreak was detected, so the native runtime cannot load its own libraries (libiosexec). Everything is routed to the iSH sandbox.")
         }
         return AppLocalized("The environment allows native execution but the runtime failed its startup probe. Tap One-tap repair.")
     }
 
-    /// 一键修复：清缓存 → 重新探针 → 按失败类型执行对应动作。
+    /// 把外部运行时复制进 App 容器。
     ///
-    /// - Parameter removeDamagedRuntimes: 是否顺带删掉「截断/损坏」的运行时目录
-    ///   （运行时诊断页的损坏列表用的就是同一份判断）。默认 false：
-    ///   删除是破坏性操作，只在用户明确点了相应按钮时才做。
+    /// 这是 libiosexec 的**根因修复**：运行时放在别的 App 目录或共享目录时，
+    /// 沙箱会拦截 `mmap()`，dyld 直接 abort。复制到自己容器的
+    /// `Library/Application Support/NativeToolchain/` 后，App 有完整读写权限，
+    /// dylib 就能被正常映射。
+    @MainActor
+    static func importRuntimeIntoContainer(from theosRoot: String?) async -> (ok: Bool, message: String) {
+        guard let rootPath = theosRoot, !rootPath.isEmpty else {
+            return (false, AppLocalized("No Theos root to import."))
+        }
+        guard let support = FileManager.default.urls(for: .applicationSupportDirectory,
+                                                     in: .userDomainMask).first else {
+            return (false, AppLocalized("App container is not available."))
+        }
+        let container = support.appendingPathComponent("NativeToolchain", isDirectory: true)
+        if rootPath.hasPrefix(container.path) {
+            return (true, AppLocalized("The runtime is already inside the app container."))
+        }
+        let source = URL(fileURLWithPath: rootPath).deletingLastPathComponent()
+        let dest = container.appendingPathComponent(source.lastPathComponent)
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: source.path) else {
+            return (false, AppLocalized("The runtime directory no longer exists: ") + source.path)
+        }
+
+        let errorText: String? = await Task.detached(priority: .userInitiated) { () -> String? in
+            let fm = FileManager.default
+            do {
+                try? fm.createDirectory(at: container, withIntermediateDirectories: true)
+                if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
+                try fm.copyItem(at: source, to: dest)
+                return nil
+            } catch {
+                return error.localizedDescription
+            }
+        }.value
+
+        if let errorText {
+            return (false, AppLocalized("Copy failed: ") + errorText)
+        }
+        let inner = dest.appendingPathComponent("theos", isDirectory: true)
+        let resolved = fm.fileExists(atPath: inner.appendingPathComponent("makefiles/common.mk").path) ? inner : dest
+        NativeToolchain.manualRootPath = resolved.path
+        NativeToolchain.shared.resetCache()
+        NativeRuntimeHealthMonitor.shared.invalidate()
+        return (true, AppLocalized("Copied the runtime into the app container: ") + resolved.path)
+    }
+
+    /// 一键修复：清缓存 → 重新探针 → 按失败类型执行对应动作。
     @MainActor
     static func oneClick(removeDamagedRuntimes: Bool = false) async -> RuntimeRepairReport {
         var steps: [String] = []
         var resolved = false
 
+        MinisHostEnvironmentDetector.invalidateCache()
         let host = MinisHostEnvironmentDetector.detect()
         steps.append(AppLocalized("Environment: ") + host.summary)
         if !host.evidence.isEmpty {
@@ -82,37 +128,35 @@ enum RuntimeRepair {
         steps.append(AppLocalized("Cleared toolchain and probe caches."))
 
         // 2) 真跑一次 shell。
-        let health = await NativeRuntimeHealthMonitor.shared.refresh(force: true)
+        var health = await NativeRuntimeHealthMonitor.shared.refresh(force: true)
         steps.append(AppLocalized("Probe: ") + health.summary)
+
+        // 3) libiosexec / spawn 拒绝：先把运行时搬进 App 容器再试一次。
+        if !health.ok, health.failure.workaroundIsSandbox, let root = health.theosRoot {
+            let imported = await importRuntimeIntoContainer(from: root)
+            steps.append(imported.message)
+            if imported.ok {
+                health = await NativeRuntimeHealthMonitor.shared.refresh(force: true)
+                steps.append(AppLocalized("Probe after import: ") + health.summary)
+            }
+        }
 
         if health.ok {
             resolved = true
+            steps.append(AppLocalized("Native execution is working again."))
             return RuntimeRepairReport(title: AppLocalized("Runtime repaired"), steps: steps, resolved: resolved)
         }
 
-        // 3) 按失败类型处理。
+        // 4) 按失败类型收尾。
         switch health.failure {
         case .toolchainMissing, .shellMissing:
             steps.append(AppLocalized("No usable Theos runtime was found — install it from Settings → Developer Runtime, then run One-tap repair again."))
-            // 工具链缺失时仍然允许把执行器落到沙箱，避免所有命令不可用。
-            if !ToolExecutorPreference.shared.sandboxMode {
-                ToolExecutorPreference.shared.sandboxMode = true
-                steps.append(AppLocalized("Switched the executor to the iSH sandbox so commands keep working."))
-            } else {
-                steps.append(AppLocalized("The executor is already the iSH sandbox — commands keep working; the native runtime stays disabled until it can be verified."))
-            }
+            switchToSandboxIfNeeded(&steps)
             // 执行器已经在沙箱时，命令本身是可用的，只是原生编译能力缺失。
             resolved = true
 
         case .spawnDenied, .dyldBlocked, .crashed, .timedOut, .unknown:
-            if !ToolExecutorPreference.shared.sandboxMode {
-                ToolExecutorPreference.shared.sandboxMode = true
-                steps.append(AppLocalized("Switched the executor to the iSH sandbox: the native runtime cannot start in this environment (blocked libiosexec / spawn denied)."))
-                resolved = true
-            } else {
-                steps.append(AppLocalized("The executor is already the iSH sandbox — commands keep working; the native runtime stays disabled until it can be verified."))
-                resolved = true
-            }
+            switchToSandboxIfNeeded(&steps)
             steps.append(AppLocalized("If you installed this app outside TrollStore/a jailbreak, native execution will never work here — that is expected, not a bug."))
             if let root = health.theosRoot {
                 steps.append(AppLocalized("Runtime root: ") + root)
@@ -120,6 +164,7 @@ enum RuntimeRepair {
             if !health.detail.isEmpty {
                 steps.append(AppLocalized("Last error: ") + health.detail)
             }
+            resolved = true
 
         case .none:
             resolved = true
@@ -128,6 +173,17 @@ enum RuntimeRepair {
         return RuntimeRepairReport(title: resolved ? AppLocalized("Repair finished") : AppLocalized("Repair could not finish"),
                                    steps: steps,
                                    resolved: resolved)
+    }
+
+    /// 把执行器落到 iSH 沙箱，并把这一步写进报告。
+    @MainActor
+    private static func switchToSandboxIfNeeded(_ steps: inout [String]) {
+        if !ToolExecutorPreference.shared.sandboxMode {
+            ToolExecutorPreference.shared.sandboxMode = true
+            steps.append(AppLocalized("Switched the executor to the iSH sandbox: the native runtime cannot start in this environment (blocked libiosexec / spawn denied)."))
+        } else {
+            steps.append(AppLocalized("The executor is already the iSH sandbox — commands keep working; the native runtime stays disabled until it can be verified."))
+        }
     }
 
     /// 删除损坏（截断/非 Mach-O）的运行时目录，返回被删掉的运行时 id。

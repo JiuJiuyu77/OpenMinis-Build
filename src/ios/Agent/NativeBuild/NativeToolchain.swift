@@ -42,7 +42,11 @@ struct NativeToolchain {
         return found
     }
 
-    var isAvailable: Bool { theosRoot != nil && shellPath != nil }
+    /// 真正的「可用」：找到 Theos 根 + 能执行 shell + 真的能找到 make。
+    /// 只判断前两项会把「下载了一半的运行时目录」也算成已安装。
+    var isAvailable: Bool {
+        theosRoot != nil && shellPath != nil && findTool("make") != nil
+    }
 
     /// 用户点了「重新检测」：清掉探测缓存。
     func resetCache() {
@@ -84,6 +88,12 @@ struct NativeToolchain {
             title: AppLocalized("Manual path"),
             detail: manual ?? AppLocalized("Not set"),
             ok: manual != nil))
+        lines.append(.init(
+            title: AppLocalized("Reuse external runtime"),
+            detail: Self.reuseExternalRuntime
+                ? AppLocalized("On — MT-Agent / CodexApp directories are scanned")
+                : AppLocalized("Off — only runtimes installed in this app are used"),
+            ok: true))
 
         var hitRoot: String?
         for root in roots {
@@ -152,6 +162,12 @@ struct NativeToolchain {
         UserDefaults.standard.bool(forKey: "toolExecutor.preferCustomRuntime")
     }
 
+    /// 是否扫描其它 App（MT-Agent / CodexApp）的运行时目录。默认关闭。
+    /// 那些目录在沙箱构建里 mmap 不了，却会让「未安装 Theos」显示为已就绪。
+    static var reuseExternalRuntime: Bool {
+        UserDefaults.standard.bool(forKey: "nativeToolchain.reuseExternalRuntime")
+    }
+
     /// 用户手动指定的工具链根目录（设置 → 执行器 → 工具链 → 手动指定）。
     /// 探测失败时的兜底：不猜布局，直接用用户给的路径。
     static let manualRootKey = "nativeToolchain.rootOverride"
@@ -218,17 +234,20 @@ struct NativeToolchain {
             roots.append(support.appendingPathComponent("NativeToolchain", isDirectory: true))
             roots.append(support.appendingPathComponent("CodexApp", isDirectory: true))
         }
-        // MT 实际布局：`PreparedRuntimes/TheosRuntime/theos/makefiles/common.mk`
-        for path in mtRuntimeRoots {
-            let url = URL(fileURLWithPath: path, isDirectory: true)
-            roots.append(url)
-            // `PreparedRuntimes` 下同样是一层运行时子目录。
-            let children = (try? FileManager.default.contentsOfDirectory(
-                at: url, includingPropertiesForKeys: [.isDirectoryKey],
-                options: [.skipsHiddenFiles])) ?? []
-            roots.append(contentsOf: children.filter {
-                (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
-            })
+        // MT / CodexApp 的运行时目录默认不扫（见 reuseExternalRuntime）。
+        // 用户明确勾选「复用外部运行时」后才作为候选。
+        if reuseExternalRuntime {
+            for path in mtRuntimeRoots {
+                let url = URL(fileURLWithPath: path, isDirectory: true)
+                roots.append(url)
+                // `PreparedRuntimes` 下同样是一层运行时子目录。
+                let children = (try? FileManager.default.contentsOfDirectory(
+                    at: url, includingPropertiesForKeys: [.isDirectoryKey],
+                    options: [.skipsHiddenFiles])) ?? []
+                roots.append(contentsOf: children.filter {
+                    (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+                })
+            }
         }
         roots.append(URL(fileURLWithPath: "/var/mobile/Library/Application Support/NativeToolchain"))
         // 去重，避免同一路径被 BFS 扫两次。

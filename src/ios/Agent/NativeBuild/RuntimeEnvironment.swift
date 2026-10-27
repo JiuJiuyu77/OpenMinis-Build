@@ -39,10 +39,10 @@ enum MinisHostEnvironment: String, Sendable {
 
     var displayName: String {
         switch self {
-        case .trollStore: return AppLocalized("TrollStore")
-        case .jailbreakRootless: return AppLocalized("Jailbreak (rootless)")
-        case .jailbreakRootful: return AppLocalized("Jailbreak (rootful)")
-        case .appSandbox: return AppLocalized("App sandbox")
+        case .trollStore: return AppLocalized("TrollStore (巨魔)")
+        case .jailbreakRootless: return AppLocalized("Jailbreak (rootless · 无根越狱)")
+        case .jailbreakRootful: return AppLocalized("Jailbreak (rootful · 有根越狱)")
+        case .appSandbox: return AppLocalized("Neither TrollStore nor jailbreak (沙箱)")
         case .unknown: return AppLocalized("Unknown")
         }
     }
@@ -81,6 +81,30 @@ struct MinisHostEnvironmentReport: Sendable {
 
 enum MinisHostEnvironmentDetector {
 
+    private static let cacheLock = NSLock()
+    private static var cachedReport: (report: MinisHostEnvironmentReport, at: Date)?
+
+    /// 30 秒缓存：设置页、执行器、探针都会读，没必要每次都扫一遍文件系统。
+    static var cached: MinisHostEnvironmentReport {
+        cacheLock.lock()
+        if let hit = cachedReport, Date().timeIntervalSince(hit.at) < 30 {
+            cacheLock.unlock()
+            return hit.report
+        }
+        cacheLock.unlock()
+        let fresh = detect()
+        cacheLock.lock()
+        cachedReport = (fresh, Date())
+        cacheLock.unlock()
+        return fresh
+    }
+
+    static func invalidateCache() {
+        cacheLock.lock()
+        cachedReport = nil
+        cacheLock.unlock()
+    }
+
     /// 探测当前安装环境。纯本地判断，不发起网络请求，耗时以毫秒计。
     static func detect() -> MinisHostEnvironmentReport {
         let fm = FileManager.default
@@ -118,16 +142,17 @@ enum MinisHostEnvironmentDetector {
         }
 
         let environment: MinisHostEnvironment
-        if trollStore {
-            environment = .trollStore
-        } else if hasVarJB {
+        if hasVarJB {
+            // 无根越狱优先：/var/jb 是最硬的证据。
             environment = .jailbreakRootless
         } else if hasDpkg || hasCydia {
             environment = .jailbreakRootful
-        } else if sandboxed {
-            environment = .appSandbox
+        } else if trollStore || !sandboxed {
+            // 没有越狱标记、但进程能写出容器：巨魔安装（no-sandbox 生效）。
+            environment = .trollStore
+            if !trollStore { evidence.append("✓ " + AppLocalized("process is not sandboxed — TrollStore signature")) }
         } else {
-            environment = .unknown
+            environment = .appSandbox
         }
 
         return MinisHostEnvironmentReport(environment: environment,
