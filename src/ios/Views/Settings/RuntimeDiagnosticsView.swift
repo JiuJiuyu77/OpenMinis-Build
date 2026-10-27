@@ -18,7 +18,7 @@ import SwiftUI
 
 // MARK: - 检查项
 
-private struct RuntimeDiagItem: Identifiable {
+struct RuntimeDiagItem: Identifiable {
     enum Status: Equatable {
         case pending
         case running
