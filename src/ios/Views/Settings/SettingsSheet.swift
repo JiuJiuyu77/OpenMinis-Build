@@ -172,6 +172,27 @@ struct SettingsSheet: View {
                         }
                     }
 
+                    // [T-model-config-independent] 模型编译配置独立于编译工作台：
+                    // 这里只管模型调用 native_build 时用的默认参数。
+                    NavigationLink {
+                        ModelBuildProfileSettingsView()
+                    } label: {
+                        Label {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(verbatim: "模型编译配置")
+                                Text(verbatim: "Model Build Profiles · 模型侧参数")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: "slider.horizontal.3")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.white)
+                                .frame(width: 21, height: 21)
+                                .background(.teal, in: Circle())
+                        }
+                    }
+
                     // [T-prompt-injection] 用户自定义指令：全局 / 单会话两个作用域，
                     // 保存后追加到系统提示词末尾（见 AIChatViewModel.baseSystemPrompt）。
                     NavigationLink {
