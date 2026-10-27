@@ -252,4 +252,21 @@ enum CapabilityID {
     static let iCloudSync = "sync.icloud"
     /// 插件宿主本身可用。
     static let pluginHost = "plugin.host"
+
+    // 以下 id 直接对齐运行时清单的 `provides`，这样「装了 Node 运行时」
+    // 就能用清单里的名字查询，不必再维护一套别名。
+    /// Node.js 运行时（node.javascript）。
+    static let nodeRuntime = "node.javascript"
+    /// CPython 运行时（python.runtime）。
+    static let pythonRuntime = "python.runtime"
+    /// 基础开发工具（core.git / rg / curl / jq …）。
+    static let coreTools = "core.git"
+    /// CMake + Ninja（build.cmake）。
+    static let buildTools = "build.cmake"
+    /// radare2 / mt-macho（reverse.radare2）。
+    static let reverseTools = "reverse.radare2"
+
+    /// 由 Developer Runtime 安装后才会出现的能力。
+    static let developerRuntimeCapabilities = [nodeRuntime, pythonRuntime,
+                                               coreTools, buildTools, reverseTools]
 }

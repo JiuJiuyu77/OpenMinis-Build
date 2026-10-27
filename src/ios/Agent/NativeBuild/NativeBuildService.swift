@@ -398,10 +398,12 @@ final class NativeBuildService: ObservableObject {
                 }
             }.value
             appendLog("✓ 打壳完成：\(outcome.ipa.path)")
-            appendLog("⚠️ 注入后原签名失效：安装前请用 ldid -S<entitlements> 重签（TrollStore 会代签）。")
+            if outcome.needsResign {
+                appendLog("⚠️ 注入后签名未补回：安装前请用 ldid -S<entitlements> 重签（TrollStore 会代签）。")
+            }
             return NativeBuildResult(ok: true, exitCode: 0, seconds: build.seconds,
                                      artifacts: [outcome.ipa.path], log: build.log,
-                                     message: "打壳成功（需要重签）")
+                                     message: outcome.needsResign ? "打壳成功（需要重签）" : "打壳成功（已重签）")
         } catch {
             appendLog("✗ 打壳失败：\(error.localizedDescription)")
             return NativeBuildResult(ok: false, exitCode: -1, seconds: build.seconds,
@@ -471,6 +473,14 @@ final class NativeBuildService: ObservableObject {
             foundMessage = artifacts.isEmpty ? "构建成功，但没找到 .deb 产物" : "构建成功"
         case .dylib:
             if let dylib = IPAShellPacker.findBuiltDylib(in: config.projectPath) {
+                // dyld 只接受签名完整的 dylib；ldid 写入 entitlements 后再用
+                // codex-sign 补 CodeDirectory，缺工具时保持原样并如实说明。
+                let signing = RuntimeSigner.signArtifacts(paths: [dylib])
+                if signing.status != .signed {
+                    onLine?("⚠️ dylib 未完整签名：\(signing.shortSummary)")
+                } else {
+                    onLine?("▸ 已签名 dylib（ldid + codex-sign）")
+                }
                 artifacts = [dylib.path]
                 foundMessage = "构建成功（dylib）"
             } else {

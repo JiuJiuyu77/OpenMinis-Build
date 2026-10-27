@@ -347,3 +347,25 @@ TrollStore 的 CoreTrust 绕过路径。
 
 顺带说明一个名词：`Helpers/codex-sign` 里的 “codex” 与 Codex AI 无关，它是 TrollStore
 血统的签名工具名（补 App Store 形态 CodeDirectory），本分支的签名层用的就是它。
+
+### 产物签名（不只是运行时）
+
+同一条签名链也用在构建产物上，否则「编译成功」和「能跑」之间仍然断一截：
+
+| 场景 | 处理 |
+|---|---|
+| `product == .dylib` | 编完立刻 `ldid` + `codex-sign`，日志里 `已签名 dylib`；缺工具时如实写 `dylib 未完整签名` |
+| `product == .ipaShell` | 注入会清掉原签名，打壳收尾对**主二进制 + 注入的 dylib** 重签；成功则结论文案变成「打壳成功（已重签）」，失败/不可用时仍标「需要重签」并写明原因 |
+
+`RuntimeSigner.signArtifacts(paths:)` 是这两个场景的共用入口：不依赖清单条目，
+按 Mach-O 过滤（脚本/软链自动跳过），签名深度与装运行时完全一致。
+
+### 能力注册：装了什么就能查什么
+
+`CapabilityRegistry` 新增 5 个与清单 `provides` **同名**的能力 id（不另造别名）：
+
+`node.javascript`、`python.runtime`、`core.git`、`build.cmake`、`reverse.radare2`
+
+判定来源只有一个：`DeveloperRuntimeManager.installedCapabilities`（来自安装记录的
+`provides`）。因此设置页 / `native_build` / 能力页问的是同一个真相，不会出现
+「Devicce Runtime 显示已装、能力页说不可用」。

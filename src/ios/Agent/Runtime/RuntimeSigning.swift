@@ -184,6 +184,92 @@ enum RuntimeSigner {
                                  ldidPath: ldid.path, codexSignPath: codexSign?.path, checkedAt: Date())
     }
 
+    /// 给**构建产物**签名（NativeBuild 的 dylib / 打壳后的 App 主二进制）。
+    ///
+    /// 与装运行时不同：这里没有清单条目可依，签名深度由调用方决定 ——
+    /// 编出来的 dylib 需要完整 CodeDirectory 才能被 dyld 接受，而注入过的
+    /// App 主二进制同理（注入会清掉原签名）。
+    static func signArtifacts(paths: [URL],
+                              adhocOnly: Bool = false,
+                              canExecuteNative: Bool? = nil,
+                              timeout: TimeInterval = 180) -> RuntimeSignReport {
+        let executableHost = canExecuteNative
+            ?? MinisHostEnvironmentDetector.cached.environment.canRunNativeBinaries
+        let targets = paths.filter { isMachO($0) }
+        guard !targets.isEmpty else {
+            return RuntimeSignReport(status: .skipped, mode: nil, signedCount: 0, failedPaths: [],
+                                     reason: AppLocalized("No Mach-O output to sign."),
+                                     ldidPath: nil, codexSignPath: nil, checkedAt: Date())
+        }
+        guard executableHost else {
+            return RuntimeSignReport(status: .skipped, mode: nil, signedCount: 0, failedPaths: [],
+                                     reason: AppLocalized("Cannot run the signing tools in this environment."),
+                                     ldidPath: nil, codexSignPath: nil, checkedAt: Date())
+        }
+        guard let ldid = locateLdid() else {
+            return RuntimeSignReport(status: .skipped, mode: nil, signedCount: 0, failedPaths: [],
+                                     reason: AppLocalized("ldid was not found. Install the Theos runtime first."),
+                                     ldidPath: nil, codexSignPath: nil, checkedAt: Date())
+        }
+        let codexSign = locateCodexSign()
+        let entitlements = adhocOnly ? nil : entitlementsPlist()
+        let plistURL = entitlements.flatMap(writeTemporaryPlist)
+        defer { if let plistURL { try? FileManager.default.removeItem(at: plistURL) } }
+
+        var signed = 0
+        var failed: [String] = []
+        var lastOutput = ""
+        for target in targets {
+            let ldidArguments = (adhocOnly || plistURL == nil)
+                ? ["-S", target.path]
+                : ["-S" + (plistURL?.path ?? ""), target.path]
+            let ldidResult = RuntimeProbeRunner.run(executable: ldid.path,
+                                                    arguments: ldidArguments,
+                                                    environment: ProcessInfo.processInfo.environment,
+                                                    workingDirectory: target.deletingLastPathComponent().path,
+                                                    timeout: timeout)
+            lastOutput = ldidResult.output
+            if ldidResult.spawnError != nil || ldidResult.status != 0 {
+                failed.append(target.lastPathComponent)
+                continue
+            }
+            if let codexSign {
+                var arguments: [String] = []
+                if adhocOnly {
+                    arguments.append("--adhoc-only")
+                } else if let plistURL {
+                    arguments.append(contentsOf: ["--entitlements", plistURL.path])
+                }
+                arguments.append(target.path)
+                let codexResult = RuntimeProbeRunner.run(executable: codexSign.path,
+                                                         arguments: arguments,
+                                                         environment: ProcessInfo.processInfo.environment,
+                                                         workingDirectory: target.deletingLastPathComponent().path,
+                                                         timeout: timeout)
+                lastOutput = codexResult.output
+                if codexResult.spawnError != nil || codexResult.status != 0 {
+                    failed.append(target.lastPathComponent)
+                    continue
+                }
+            }
+            signed += 1
+        }
+        if !failed.isEmpty {
+            return RuntimeSignReport(status: .failed, mode: codexSign == nil ? "ldid" : "ldid+codex-sign",
+                                     signedCount: signed, failedPaths: failed,
+                                     reason: String(lastOutput.split(separator: "\n").suffix(3)
+                                                    .joined(separator: " | ").prefix(400)),
+                                     ldidPath: ldid.path, codexSignPath: codexSign?.path, checkedAt: Date())
+        }
+        return RuntimeSignReport(status: codexSign == nil ? .adhocOnly : .signed,
+                                 mode: codexSign == nil ? "ldid" : "ldid+codex-sign",
+                                 signedCount: signed, failedPaths: [],
+                                 reason: codexSign == nil
+                                    ? AppLocalized("codex-sign is not bundled, so the App Store-style CodeDirectory is missing.")
+                                    : nil,
+                                 ldidPath: ldid.path, codexSignPath: codexSign?.path, checkedAt: Date())
+    }
+
     // MARK: - 工具定位
 
     /// `codex-sign` 由 App 自带（`Helpers/codex-sign`）；运行时目录里也允许放一份。

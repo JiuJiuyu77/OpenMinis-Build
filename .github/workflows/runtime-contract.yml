@@ -20,13 +20,17 @@ on:
     paths:
       - "scripts/check_runtime_manifest.py"
       - "src/ios/Agent/Runtime/**"
+      - "src/ios/Agent/NativeBuild/**"
       - "src/ios/Views/Settings/DeveloperRuntimeSettingsView.swift"
+      - "scripts/stage_app_helpers.sh"
       - ".github/workflows/runtime-contract.yml"
   pull_request:
     paths:
       - "scripts/check_runtime_manifest.py"
       - "src/ios/Agent/Runtime/**"
+      - "src/ios/Agent/NativeBuild/**"
       - "src/ios/Views/Settings/DeveloperRuntimeSettingsView.swift"
+      - "scripts/stage_app_helpers.sh"
       - ".github/workflows/runtime-contract.yml"
 
 permissions:
@@ -83,6 +87,8 @@ jobs:
           set -euo pipefail
           swiftc -version
           swiftc -parse src/ios/Agent/Runtime/*.swift
+          swiftc -parse src/ios/Agent/NativeBuild/IPAShellPacker.swift \
+                        src/ios/Agent/NativeBuild/NativeBuildService.swift
           swiftc -parse src/ios/Views/Settings/DeveloperRuntimeSettingsView.swift
           echo "runtime sources parse cleanly"
 
@@ -96,6 +102,10 @@ jobs:
           grep -q "RuntimeEnvironmentOverlay.build" src/ios/Agent/Runtime/DeveloperRuntimeManager.swift
           grep -q "installSpecOrNone" src/ios/Agent/Runtime/RuntimeManifest.swift
           grep -q "codex-sign" src/ios/Agent/Runtime/RuntimeSigning.swift
+          grep -q "RuntimeSigner.signArtifacts" src/ios/Agent/NativeBuild/IPAShellPacker.swift
+          grep -q "RuntimeSigner.signArtifacts" src/ios/Agent/NativeBuild/NativeBuildService.swift
+          grep -q "CapabilityID.nodeRuntime" src/ios/Agent/Runtime/BuiltinCapabilities.swift
+          grep -q "unsupportedHandlers" src/ios/Agent/Runtime/DeveloperRuntimeManager.swift
           echo "self-check + signing + environment overlay are wired into the manager"
 
       - name: Shell scripts parse
