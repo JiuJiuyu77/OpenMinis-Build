@@ -89,7 +89,11 @@ jobs:
           swiftc -parse src/ios/Agent/Runtime/*.swift
           swiftc -parse src/ios/Agent/NativeBuild/IPAShellPacker.swift \
                         src/ios/Agent/NativeBuild/NativeBuildService.swift
-          swiftc -parse src/ios/Views/Settings/DeveloperRuntimeSettingsView.swift
+          swiftc -parse src/ios/Views/Settings/DeveloperRuntimeSettingsView.swift \
+                        src/ios/Views/Settings/RuntimeDiagnosticsView.swift \
+                        src/ios/Views/Settings/ToolExecutorSettingsView.swift
+          swiftc -parse src/ios/Agent/NativeBuild/ToolExecutorPreference.swift \
+                        src/ios/Agent/NativeBuild/NativeToolchain.swift
           echo "runtime sources parse cleanly"
 
       - name: Install gates are wired
@@ -106,7 +110,19 @@ jobs:
           grep -q "RuntimeSigner.signArtifacts" src/ios/Agent/NativeBuild/NativeBuildService.swift
           grep -q "CapabilityID.nodeRuntime" src/ios/Agent/Runtime/BuiltinCapabilities.swift
           grep -q "unsupportedHandlers" src/ios/Agent/Runtime/DeveloperRuntimeManager.swift
+          grep -q "nativeLayers" src/ios/Views/Settings/RuntimeDiagnosticsView.swift
+          grep -q "RuntimeSigner.locateCodexSign" src/ios/Views/Settings/RuntimeDiagnosticsView.swift
+          # 借来的运行时目录必须保持删除状态（回归守卫）：
+          if grep -rq "nativeToolchain.reuseExternalRuntime\|toolExecutor.preferCustomRuntime" src/ios --include=*.swift; then
+            echo "borrowed-runtime switch is back in the executor" >&2
+            exit 1
+          fi
           echo "self-check + signing + environment overlay are wired into the manager"
+
+      - name: Localization coverage report
+        run: |
+          set -euo pipefail
+          python3 scripts/check_localization_keys.py | tail -5
 
       - name: Shell scripts parse
         run: |

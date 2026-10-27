@@ -75,9 +75,30 @@ final class RuntimeDiagnosticsModel: ObservableObject {
               tint: [.gray, .blue], subtitle: AppLocalized("TrollStore or jailbreak")),
     ]
 
+    /// MT 式「三层执行链」实测：执行层（子进程身份 + 文件边界 + TCC 边界）、
+    /// 签名层（ldid + codex-sign）、以及每个已装运行时的自检/签名结论。
+    /// 这些项以前完全没有：诊断页只能说「工具链在不在」，说不清「装完了能不能跑」。
+    @Published var nativeLayers: [RuntimeDiagItem] = [
+        .init(id: "native-spawn", title: AppLocalized("Child process identity"),
+              icon: "person.badge.key.fill", tint: [.green, .mint],
+              subtitle: AppLocalized("uid / gid a posix_spawn child inherits")),
+        .init(id: "native-fs", title: AppLocalized("Filesystem boundary"),
+              icon: "externaldrive.fill", tint: [.blue, .teal],
+              subtitle: AppLocalized("Writable: /tmp, Library, Media · read-only: /, /System/Library")),
+        .init(id: "native-tcc", title: AppLocalized("TCC boundary"),
+              icon: "lock.doc.fill", tint: [.orange, .red],
+              subtitle: AppLocalized("SMS / CallHistory / TCC stay unreadable despite root")),
+        .init(id: "native-sign", title: AppLocalized("Signing layer"),
+              icon: "signature", tint: [.purple, .indigo],
+              subtitle: AppLocalized("ldid + codex-sign, and the entitlements they propagate")),
+        .init(id: "native-runtimes", title: AppLocalized("Runtime self-checks"),
+              icon: "checkmark.seal.fill", tint: [.mint, .green],
+              subtitle: AppLocalized("Per-runtime self-check and signing outcome")),
+    ]
+
     private var timerTask: Task<Void, Never>?
 
-    var allItems: [RuntimeDiagItem] { basic + project + optional }
+    var allItems: [RuntimeDiagItem] { basic + project + optional + nativeLayers }
     var failedCount: Int {
         allItems.filter { if case .failed = $0.status { return true }; return false }.count
     }
@@ -129,6 +150,7 @@ final class RuntimeDiagnosticsModel: ObservableObject {
         for index in basic.indices { basic[index].status = .pending; basic[index].detail = "" }
         for index in project.indices { project[index].status = .pending; project[index].detail = "" }
         for index in optional.indices { optional[index].status = .pending; optional[index].detail = "" }
+        for index in nativeLayers.indices { nativeLayers[index].status = .pending; nativeLayers[index].detail = "" }
 
         // 1) 沙箱内核
         set("kernel", .running)
@@ -217,6 +239,113 @@ final class RuntimeDiagnosticsModel: ObservableObject {
         set("environment", .running)
         set("environment", host.environment.canRunNativeBinaries ? .ok : .skipped(host.summary),
             detail: host.nativeOutlook)
+
+        // 11) 子进程身份（执行层）：posix_spawn 出来的子进程继承 uid/gid。
+        set("native-spawn", .running)
+        if NativeToolchain.shared.shellPath == nil {
+            set("native-spawn", .skipped(AppLocalized("No native shell available")), detail: "")
+        } else {
+            let identity = await native("id -u; id -g; uname -m", timeout: 15)
+            let parts = identity.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+            if parts.count >= 2 {
+                let summary = "uid=\(parts[0]) gid=\(parts[1])" + (parts.count > 2 ? " · \(parts[2])" : "")
+                if parts[0] == "0" {
+                    set("native-spawn", .ok, detail: summary)
+                } else {
+                    set("native-spawn", .failed(AppLocalized("Child processes are not root")), detail: summary)
+                }
+            } else {
+                set("native-spawn", .failed(AppLocalized("Could not read the child process identity")),
+                    detail: firstLine(identity))
+            }
+        }
+
+        // 12) 文件系统边界：该写的能写，SSV 该只读的确实只读。
+        set("native-fs", .running)
+        let fsScript = "for d in /tmp /var/mobile/Library /var/mobile/Media; do "
+            + "t=\"$d/.minis-diag-$$\"; if ( : > \"$t\" ) 2>/dev/null; then echo W:$d; rm -f \"$t\"; "
+            + "else echo N:$d; fi; done; "
+            + "for d in / /System/Library; do t=\"$d/.minis-diag-$$\"; "
+            + "if ( : > \"$t\" ) 2>/dev/null; then echo X:$d; rm -f \"$t\"; else echo R:$d; fi; done"
+        let fsReport = await native(fsScript, timeout: 20)
+        let writeLines = fsReport.split(separator: "\n").filter { $0.hasPrefix("W:") }
+        let wronglyWritable = fsReport.split(separator: "\n").filter { $0.hasPrefix("X:") }
+        let readOnly = fsReport.split(separator: "\n").filter { $0.hasPrefix("R:") }
+        if writeLines.count >= 3 && wronglyWritable.isEmpty {
+            set("native-fs", .ok,
+                detail: String(format: AppLocalized("%ld writable · %ld read-only (SSV intact)"),
+                               writeLines.count, readOnly.count))
+        } else if wronglyWritable.isEmpty {
+            set("native-fs", .failed(AppLocalized("Expected writable directories are not writable")),
+                detail: firstLine(fsReport))
+        } else {
+            set("native-fs", .failed(AppLocalized("SSV read-only volumes became writable (unexpected)")),
+                detail: wronglyWritable.joined(separator: ", "))
+        }
+
+        // 13) TCC 边界：以 root 也读不到短信/通话/TCC 数据库，说明越界被挡住。
+        set("native-tcc", .running)
+        let tccScript = "for f in /var/mobile/Library/SMS/sms.db "
+            + "/var/mobile/Library/CallHistoryDB/CallHistory.storedata /var/mobile/Library/TCC/TCC.db; do "
+            + "if head -c 1 \"$f\" >/dev/null 2>&1; then echo OPEN:$f; else echo DENY:$f; fi; done"
+        let tccReport = await native(tccScript, timeout: 20)
+        let opened = tccReport.split(separator: "\n").filter { $0.hasPrefix("OPEN:") }
+        if tccReport.isEmpty {
+            set("native-tcc", .skipped(AppLocalized("No native shell available")), detail: "")
+        } else if opened.isEmpty {
+            let denied = tccReport.split(separator: "\n").filter { $0.hasPrefix("DENY:") }.count
+            set("native-tcc", .ok, detail: String(format: AppLocalized("%ld protected stores denied"), denied))
+        } else {
+            set("native-tcc", .failed(AppLocalized("A TCC-protected store is readable")),
+                detail: opened.joined(separator: ", "))
+        }
+
+        // 14) 签名层：ldid + codex-sign 是否就位，以及可传播的 entitlements。
+        set("native-sign", .running)
+        let ldid = RuntimeSigner.locateLdid()
+        let codexSign = RuntimeSigner.locateCodexSign()
+        let entitlements = RuntimeSigner.entitlementsPlist()
+        let entitlementCount = entitlements?.count ?? 0
+        if ldid != nil, codexSign != nil, entitlementCount > 0 {
+            set("native-sign", .ok,
+                detail: String(format: AppLocalized("ldid + codex-sign · %ld entitlements to propagate"),
+                               entitlementCount))
+        } else if ldid != nil {
+            set("native-sign", .skipped(AppLocalized("codex-sign is not bundled")),
+                detail: String(format: AppLocalized("%ld entitlements · ad-hoc signing only"), entitlementCount))
+        } else {
+            set("native-sign", .failed(AppLocalized("ldid was not found")),
+                detail: AppLocalized("Install the Theos runtime to enable signing."))
+        }
+
+        // 15) 每个已装运行时的自检 / 签名结论。
+        set("native-runtimes", .running)
+        let manager = DeveloperRuntimeManager.shared
+        if manager.records.isEmpty {
+            set("native-runtimes", .skipped(AppLocalized("No runtime installed")), detail: "")
+        } else {
+            var lines: [String] = []
+            var bad = 0
+            var unchecked = 0
+            for (id, record) in manager.records.sorted(by: { $0.key < $1.key }) {
+                let selfCheck = record.verification?.status.rawValue ?? "unknown"
+                let signing = record.signing?.status.rawValue ?? "unknown"
+                if record.verification?.status == .failed || record.signing?.status == .failed { bad += 1 }
+                if record.verification == nil || record.signing == nil { unchecked += 1 }
+                lines.append("\(id): \(selfCheck) / \(signing)")
+            }
+            let detail = lines.joined(separator: " · ")
+            if bad > 0 {
+                set("native-runtimes", .failed(AppLocalized("A runtime failed its self-check or signing")),
+                    detail: detail)
+            } else if unchecked > 0 {
+                // 旧记录没有自检/签名字段：仍算可用，但说明出处，避免误读成「全部验过」。
+                set("native-runtimes", .ok,
+                    detail: detail + " · " + AppLocalized("installed before self-checks existed"))
+            } else {
+                set("native-runtimes", .ok, detail: detail)
+            }
+        }
     }
 
     private func set(_ id: String, _ status: RuntimeDiagItem.Status, detail: String = "") {
@@ -229,6 +358,23 @@ final class RuntimeDiagnosticsModel: ObservableObject {
         for index in optional.indices where optional[index].id == id {
             optional[index].status = status; optional[index].detail = detail; return
         }
+        for index in nativeLayers.indices where nativeLayers[index].id == id {
+            nativeLayers[index].status = status; nativeLayers[index].detail = detail; return
+        }
+    }
+
+    /// 用运行时自带的 bash 跑一条命令（执行层实测）。
+    private func native(_ script: String, timeout: TimeInterval) async -> String {
+        guard let shell = NativeToolchain.shared.shellPath else { return "" }
+        let environment = NativeToolchain.shared.environment()
+        let result = await NativeCommandRunner.run(command: script,
+                                                   in: nil,
+                                                   environment: environment,
+                                                   timeout: timeout,
+                                                   shellOverride: shell,
+                                                   onLine: nil,
+                                                   onSpawn: nil)
+        return result.output
     }
 
     /// 在 guest 里跑一条命令，返回 stdout+stderr。
@@ -272,6 +418,7 @@ struct RuntimeDiagnosticsView: View {
             groupSection(AppLocalized("Basics"), items: model.basic)
             groupSection(AppLocalized("Project tools"), items: model.project)
             groupSection(AppLocalized("Optional capabilities"), items: model.optional)
+            groupSection(AppLocalized("Native execution (3 layers)"), items: model.nativeLayers)
             repairSection
             detailsSection
             settingsSection

@@ -72,22 +72,37 @@ swiftc -typecheck \
 
 ## 执行器（Executor）与能力注册表
 
-这三个开关位于 `设置 → 执行器（Executor）`：
+这两个开关位于 `设置 → 执行器（Executor）`：
 
 | 开关 | 存储键 | 行为 |
 |---|---|---|
-| 默认执行器 | `toolExecutor.mode` | `auto`（默认，留在 iSH）/ `sandbox` / `native` |
+| 默认执行器 | `toolExecutor.mode` | `auto`（默认）/ `sandbox` / `native` |
 | 沙箱模式 | `toolExecutor.sandboxMode` | 强制只走 iSH，覆盖上面的选择 |
-| 优先使用自定义 Runtime | `toolExecutor.preferCustomRuntime` | 让 `auto` 改用 Developer Runtime 装的工具链；同时让 `NativeToolchain` 优先探测 `Application Support/DeveloperRuntime/installed` |
 
-`auto` 刻意**不会**因为“存在工具链”就改走原生：MT-Agent 的安装里本来就有一份工具链，
-那样会让所有命令静默离开 iSH 沙箱。原生执行必须显式开启。
+`auto` 只有在「设备原生二进制可执行」**且**「本 App 装的工具链可用」时才走原生，
+其余情况留在 iSH；真正执行前还有一次真实启动探针，失败会自动回退并说明原因。
+
+### 删掉的两个开关（`preferCustomRuntime` / `reuseExternalRuntime`）
+
+运行时来源收敛成**一条**之后，这两个开关描述的取舍已经不存在：
+
+- `preferCustomRuntime`（优先使用自定义 Runtime）—— 以前要在「Developer Runtime 装的」
+  与「MT-Agent / CodexApp 共用的一份」之间选；现在只有前者 + 手动路径。
+- `reuseExternalRuntime`（复用外部运行时）—— 复用别的 App 的运行时目录是本项目早期的
+  权宜之计。那条路在沙箱构建里 mmap 不了对方的 dylib，还会把「没装 Theos」显示成
+  「已就绪」。现在运行时由本 App 自己安装、**自检**（`RuntimeInstallVerifier`）并
+  **签名**（`RuntimeSigner`，ldid + codex-sign），借别人的目录只剩坏处。
+
+所以 `NativeToolchain.candidateRoots()` 现在只扫：手动路径 → `DeveloperRuntime/installed/*`
+→ App 内置 `NativeToolchain/` → `Application Support/NativeToolchain/`；
+`/var/mobile/Library/Application Support/CodexApp/...` 这些路径已从代码里删除。
+旧的 UserDefaults 键留着不读也不写（无害），升级后不会因为残留值改变行为。
 
 相关文件：
 
 | 文件 | 职责 |
 |---|---|
-| `src/ios/Agent/NativeBuild/ToolExecutorPreference.swift` | 三个开关 + `executionDecision` 快照 |
+| `src/ios/Agent/NativeBuild/ToolExecutorPreference.swift` | 两个开关 + `executionDecision` 快照 |
 | `src/ios/Views/Settings/ToolExecutorSettingsView.swift` | 设置页与只读能力列表 |
 | `src/ios/Agent/Chat/AIChatViewModel+ISHCommand.swift` | `shell_execute` 按决策分流；`/var/minis/…` 始终留在沙箱 |
 
@@ -368,4 +383,34 @@ TrollStore 的 CoreTrust 绕过路径。
 
 判定来源只有一个：`DeveloperRuntimeManager.installedCapabilities`（来自安装记录的
 `provides`）。因此设置页 / `native_build` / 能力页问的是同一个真相，不会出现
-「Devicce Runtime 显示已装、能力页说不可用」。
+「Developer Runtime 显示已装、能力页说不可用」。
+
+## 运行时诊断：从「装没装」到「跑不跑得起来」
+
+`设置 › 运行时诊断` 原来只能回答「文件在不在」。运行时链变成 shell → 工具链 → 签名
+三层之后，这种回答不够用了：一份文件齐全但没签名、或签了名但子进程拿不到权限的工具链，
+在诊断页上全是绿的，一编译就 `Killed: 9`。
+
+新增分组 **Native execution (3 layers)**，五项都是**真跑**，不是查表：
+
+| 检查项 | 做法 | 判定 |
+|---|---|---|
+| 子进程身份 | 用运行时 shell 跑 `id -u; id -g; uname -m` | uid 必须是 0，否则报「子进程不是 root」 |
+| 文件系统边界 | 依次尝试在 `/tmp`、`/var/mobile/Library`、`/var/mobile/Media` 落文件，再尝试写 `/`、`/System/Library` | 前三个必须可写；后两个必须**不可写**（SSV 封签）；反过来可写才是异常 |
+| TCC 边界 | 尝试 `head -c 1` 读取短信、通话、TCC 数据库 | 三个都必须被拒；能读才是问题 |
+| 签名层 | `RuntimeSigner.locateLdid()` / `locateCodexSign()` / `entitlementsPlist()` | 二者齐备且有可传播 entitlements 才算 ok；缺 codex-sign 降级为 skipped 并说明只能 adhoc |
+| 运行时自检 | 逐条读安装记录里的 `verification` / `signing` | 任一条 failed 即红；旧记录（没有这两个字段）标注「早于自检机制安装」 |
+
+这几项对应 MT 实测的那组事实：`uid=0 gid=0`、可写 `/tmp`·`Library`·`Media`、可枚举其它
+App 的 Data 容器、不可写 `/` 与 `/System/Library`、不可读 SMS / CallHistoryDB / TCC。
+诊断页现在能把它们逐条摆出来，而不是让用户从一次失败的编译里猜。
+
+## 本地化
+
+本分支新增的 UI 字符串已全部落进 `Localizable.xcstrings`（zh-Hans）：
+
+- `scripts/add_runtime_localization.py` —— 本次用的插入器：按条目风格**文本插入**，
+  不重新序列化 28 万行文件（`add_localization.py` 解析不了当前格式，直接 reserialize
+  会把真实改动埋进 diff 噪声里）。
+- `scripts/check_localization_keys.py` —— 扫描 `AppLocalized("…")` 与目录比对。
+  默认只报告（main 上本来就有约 24 个历史缺口），加 `--strict` 才作为闸门用。

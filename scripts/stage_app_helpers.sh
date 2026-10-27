@@ -40,9 +40,17 @@ if [ ! -d "$SOURCE_DIR" ]; then
 fi
 
 shopt -s nullglob
-files=("$SOURCE_DIR"/*)
+# 只把真正的二进制当候选：目录里放 README 说明时也算「没有可暂存的文件」，
+# 否则「空目录 no-op」的判断会被一份文档打破。
+files=()
+for candidate in "$SOURCE_DIR"/*; do
+  case "$(basename "$candidate")" in
+    *.md|.gitkeep|.DS_Store|README*) continue ;;
+  esac
+  files+=("$candidate")
+done
 if [ ${#files[@]} -eq 0 ]; then
-  echo "stage_app_helpers: ${SOURCE_DIR} is empty, nothing to stage"
+  echo "stage_app_helpers: ${SOURCE_DIR} has no binaries, nothing to stage"
   exit 0
 fi
 

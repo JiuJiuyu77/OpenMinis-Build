@@ -37,34 +37,12 @@ struct ToolExecutorSettingsView: View {
             }
 
             Section {
-                DisclosureGroup {
-                    Toggle(isOn: $preference.preferCustomRuntime) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Prefer custom runtime")
-                            Text("Use the toolchain installed from Developer Runtime instead of the shared copy.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    Toggle(isOn: $preference.reuseExternalRuntime) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Reuse external runtime")
-                            Text("Also scan other apps' runtime folders (MT-Agent / CodexApp). Off by default: those copies cannot be loaded in a sandboxed build.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                } label: {
-                    Text(AppLocalized("Advanced"))
-                }
-            } header: {
-                Text(AppLocalized("Options"))
-            } footer: {
-                Text(AppLocalized("Automatic is the recommended setting: it uses the native runtime only when it is installed and passes a real startup probe, otherwise commands stay in the iSH sandbox."))
-            }
-
-            Section {
                 LabeledContent("Effective executor", value: preference.resolvedExecutor.displayName)
+                #if os(iOS)
+                Label("Toolchain source: this app's Developer Runtime only (no other app's runtime folders are scanned).", systemImage: "externaldrive.badge.checkmark")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                #endif
                 if preference.sandboxMode {
                     Label("Sandbox mode is on — native execution is disabled.", systemImage: "lock.shield")
                         .font(.footnote)

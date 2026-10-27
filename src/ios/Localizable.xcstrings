@@ -18,6 +18,546 @@
         }
       }
     },
+    "%ld entitlements · ad-hoc signing only": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%ld 条 entitlements · 仅 adhoc 签名"
+          }
+        }
+      }
+    },
+    "%ld protected stores denied": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%ld 个受保护数据被拒绝读取"
+          }
+        }
+      }
+    },
+    "%ld writable · %ld read-only (SSV intact)": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%ld 个可写 · %ld 个只读（SSV 完好）"
+          }
+        }
+      }
+    },
+    "A TCC-protected store is readable": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "有受 TCC 保护的数据可读"
+          }
+        }
+      }
+    },
+    "A runtime failed its self-check or signing": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "有运行时未通过自检或签名"
+          }
+        }
+      }
+    },
+    "Ad-hoc signed only": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅完成 adhoc 签名"
+          }
+        }
+      }
+    },
+    "Archive is incomplete: missing required paths.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "归档不完整：缺少必需路径。"
+          }
+        }
+      }
+    },
+    "CMake + Ninja": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CMake + Ninja"
+          }
+        }
+      }
+    },
+    "CMake and Ninja from the BuildTools runtime.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "来自 BuildTools 运行时的 CMake 与 Ninja。"
+          }
+        }
+      }
+    },
+    "Cannot execute native binaries in this environment.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前环境无法执行原生二进制。"
+          }
+        }
+      }
+    },
+    "Cannot run the signing tools in this environment.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前环境无法运行签名工具。"
+          }
+        }
+      }
+    },
+    "Child process identity": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "子进程身份"
+          }
+        }
+      }
+    },
+    "Child processes are not root": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "子进程不是 root"
+          }
+        }
+      }
+    },
+    "Core tools (git/rg/curl/jq)": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "基础工具（git/rg/curl/jq）"
+          }
+        }
+      }
+    },
+    "Could not read the child process identity": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "读不到子进程身份"
+          }
+        }
+      }
+    },
+    "Expected writable directories are not writable": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "预期可写的目录写不进去"
+          }
+        }
+      }
+    },
+    "Filesystem boundary": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文件系统边界"
+          }
+        }
+      }
+    },
+    "Git, ripgrep, curl and jq from the CoreTools runtime.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "来自 CoreTools 运行时的 git、ripgrep、curl 与 jq。"
+          }
+        }
+      }
+    },
+    "Install it from Settings → Developer Runtime.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请到 设置 → Developer Runtime 安装。"
+          }
+        }
+      }
+    },
+    "Install the Theos runtime to enable signing.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安装 Theos 运行时即可启用签名。"
+          }
+        }
+      }
+    },
+    "Managed CPython from the Developer Runtime manifest.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "运行时清单提供的 CPython。"
+          }
+        }
+      }
+    },
+    "Missing:": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "缺少："
+          }
+        }
+      }
+    },
+    "Native execution (3 layers)": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "原生执行（三层）"
+          }
+        }
+      }
+    },
+    "No Mach-O output to sign.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有需要签名的 Mach-O 产物。"
+          }
+        }
+      }
+    },
+    "No native shell available": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有可用的原生 shell"
+          }
+        }
+      }
+    },
+    "No probe declared.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未声明自检命令。"
+          }
+        }
+      }
+    },
+    "Node with npm/corepack from the Developer Runtime manifest.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "运行时清单提供的 Node 与 npm/corepack。"
+          }
+        }
+      }
+    },
+    "Node.js runtime": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Node.js 运行时"
+          }
+        }
+      }
+    },
+    "Per-runtime self-check and signing outcome": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "每个运行时的自检与签名结论"
+          }
+        }
+      }
+    },
+    "Probe executable is missing or not executable.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自检程序不存在或不可执行。"
+          }
+        }
+      }
+    },
+    "Probe exited with a non-zero status.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自检命令返回非零状态。"
+          }
+        }
+      }
+    },
+    "Probe output did not contain the expected marker.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自检输出未包含预期标记。"
+          }
+        }
+      }
+    },
+    "Probe timed out.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自检超时。"
+          }
+        }
+      }
+    },
+    "Python runtime": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Python 运行时"
+          }
+        }
+      }
+    },
+    "Reverse tools (radare2)": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "逆向工具（radare2）"
+          }
+        }
+      }
+    },
+    "Runtime self-check failed.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "运行时自检失败。"
+          }
+        }
+      }
+    },
+    "Runtime self-checks": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "运行时自检"
+          }
+        }
+      }
+    },
+    "SMS / CallHistory / TCC stay unreadable despite root": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "即使是 root 也读不到短信 / 通话 / TCC"
+          }
+        }
+      }
+    },
+    "SSV read-only volumes became writable (unexpected)": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SSV 只读卷变成可写（异常）"
+          }
+        }
+      }
+    },
+    "Self-check failed": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自检失败"
+          }
+        }
+      }
+    },
+    "Self-check passed": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自检通过"
+          }
+        }
+      }
+    },
+    "Self-check skipped": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未做自检"
+          }
+        }
+      }
+    },
+    "Signed (ldid + codex-sign)": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已签名（ldid + codex-sign）"
+          }
+        }
+      }
+    },
+    "Signing failed": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "签名失败"
+          }
+        }
+      }
+    },
+    "Signing failed.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "签名失败。"
+          }
+        }
+      }
+    },
+    "Signing layer": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "签名层"
+          }
+        }
+      }
+    },
+    "Signing skipped": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未签名"
+          }
+        }
+      }
+    },
+    "TCC boundary": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TCC 边界"
+          }
+        }
+      }
+    },
+    "This app is not signed with native entitlements, so runtime binaries cannot be made executable.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本 App 未以原生权限签名，运行时二进制无法获得执行权限。"
+          }
+        }
+      }
+    },
+    "This runtime belongs to another app's agent stack and is not installed by Minis.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "该运行时属于其它 App 的 Agent 架构，本 App 不安装。"
+          }
+        }
+      }
+    },
+    "This runtime declares no binaries to sign.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "该运行时没有声明需要签名的二进制。"
+          }
+        }
+      }
+    },
+    "This runtime does not publish a self-check.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "该运行时未提供自检。"
+          }
+        }
+      }
+    },
+    "Toolchain source: this app's Developer Runtime only (no other app's runtime folders are scanned).": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工具链来源：仅本 App 的 Developer Runtime（不再扫描其它 App 的运行时目录）。"
+          }
+        }
+      }
+    },
+    "Writable: /tmp, Library, Media · read-only: /, /System/Library": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可写：/tmp、Library、Media · 只读：/、/System/Library"
+          }
+        }
+      }
+    },
     "\"%@\" already has a value. Replace it with \"%@\"?": {
       "extractionState": "stale",
       "localizations": {
@@ -277113,6 +277653,26 @@
         }
       }
     },
+    "codex-sign is not bundled": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未内置 codex-sign"
+          }
+        }
+      }
+    },
+    "codex-sign is not bundled, so the App Store-style CodeDirectory is missing.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未内置 codex-sign，缺少 App Store 形态的 CodeDirectory。"
+          }
+        }
+      }
+    },
     "conversations": {
       "extractionState": "manual",
       "localizations": {
@@ -280451,6 +281011,16 @@
         }
       }
     },
+    "installed before self-checks existed": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "早于自检机制安装"
+          }
+        }
+      }
+    },
     "instruction": {
       "localizations": {
         "zh-Hans": {
@@ -280599,6 +281169,46 @@
           "stringUnit": {
             "state": "translated",
             "value": "剛剛"
+          }
+        }
+      }
+    },
+    "ldid + codex-sign · %ld entitlements to propagate": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ldid + codex-sign · 可传播 %ld 条 entitlements"
+          }
+        }
+      }
+    },
+    "ldid + codex-sign, and the entitlements they propagate": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ldid + codex-sign，以及它们传播的 entitlements"
+          }
+        }
+      }
+    },
+    "ldid was not found": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "找不到 ldid"
+          }
+        }
+      }
+    },
+    "ldid was not found. Install the Theos runtime first.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "找不到 ldid，请先安装 Theos 运行时。"
           }
         }
       }
@@ -281760,6 +282370,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "python3 與 pip：Python 腳本、python3 -c 單行命令與 pip 命令。"
+          }
+        }
+      }
+    },
+    "radare2 and Mach-O tooling from the ReverseTools runtime.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "来自 ReverseTools 运行时的 radare2 与 Mach-O 工具。"
           }
         }
       }
@@ -282966,6 +283586,16 @@
         }
       }
     },
+    "signing unavailable": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "签名不可用"
+          }
+        }
+      }
+    },
     "ssh logins and remote commands, and every tool that connects through ssh: scp, sftp, rsync and git over SSH. Each new connection's handshake gets faster; the encryption of the data itself runs in libcrypto.": {
       "extractionState": "manual",
       "localizations": {
@@ -283760,6 +284390,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "文件被截斷："
+          }
+        }
+      }
+    },
+    "uid / gid a posix_spawn child inherits": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "posix_spawn 子进程继承的 uid / gid"
           }
         }
       }
