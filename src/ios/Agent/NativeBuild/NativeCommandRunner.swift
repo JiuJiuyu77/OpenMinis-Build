@@ -382,3 +382,21 @@ private func diagnoseExecutable(_ path: String) -> String {
     return "诊断：" + notes.joined(separator: "、")
 }
 
+/// 运行时二进制的完整性检查：截断的残骸（几十字节）或根本不是 Mach-O 都算损坏。
+/// 返回 nil 表示看起来正常。沙盒是独立 chroot，坏了没法在沙盒里重建，
+/// 只能由 App 侧删掉损坏目录再重装。
+func runtimeBinaryDamage(_ path: String) -> String? {
+    let fm = FileManager.default
+    guard fm.fileExists(atPath: path) else { return "文件不存在" }
+    let size = ((try? fm.attributesOfItem(atPath: path))?[.size] as? Int) ?? 0
+    guard size >= 4096 else { return "只有 \(size) 字节——下载被截断的残骸" }
+    guard let fh = FileHandle(forReadingAtPath: path) else { return "无法读取" }
+    defer { try? fh.close() }
+    let head = [UInt8](fh.readData(ofLength: 4))
+    guard head.count == 4 else { return "文件过短" }
+    let magic = UInt32(head[0]) | (UInt32(head[1]) << 8) | (UInt32(head[2]) << 16) | (UInt32(head[3]) << 24)
+    guard magic == 0xFEED_FACF || magic == 0xFEED_FACE else {
+        return "不是 Mach-O（magic 0x" + String(magic, radix: 16) + "）"
+    }
+    return nil
+}
