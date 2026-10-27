@@ -149,6 +149,25 @@ enum RuntimeRepair {
 
         // 4) 按失败类型收尾。
         switch health.failure {
+        case .runtimeDamaged:
+            // zsh / libiosexec / make 不完整：唯一可靠的修法是重新下载安装运行时。
+            let runtimeID = installedRuntimeID(from: health.theosRoot)
+            if let runtimeID,
+               let descriptor = DeveloperRuntimeManager.shared.runtimes.first(where: { $0.id == runtimeID }) {
+                steps.append(AppLocalized("Runtime files are incomplete — reinstalling ") + runtimeID + "…")
+                await DeveloperRuntimeManager.shared.installAndWait(descriptor)
+                health = await NativeRuntimeHealthMonitor.shared.refresh(force: true)
+                steps.append(AppLocalized("Probe after reinstall: ") + health.summary)
+                if health.ok {
+                    resolved = true
+                    return RuntimeRepairReport(title: AppLocalized("Runtime repaired"), steps: steps, resolved: true)
+                }
+            } else {
+                steps.append(AppLocalized("The damaged runtime was not installed by Developer Runtime, so it cannot be reinstalled automatically. Install Theos from Settings → Developer Runtime."))
+            }
+            switchToSandboxIfNeeded(&steps)
+            resolved = true
+
         case .toolchainMissing, .shellMissing:
             steps.append(AppLocalized("No usable Theos runtime was found — install it from Settings → Developer Runtime, then run One-tap repair again."))
             switchToSandboxIfNeeded(&steps)
@@ -173,6 +192,15 @@ enum RuntimeRepair {
         return RuntimeRepairReport(title: resolved ? AppLocalized("Repair finished") : AppLocalized("Repair could not finish"),
                                    steps: steps,
                                    resolved: resolved)
+    }
+
+    /// 从 `DeveloperRuntime/installed/<id>/...` 里解出运行时 id。
+    nonisolated static func installedRuntimeID(from path: String?) -> String? {
+        guard let path else { return nil }
+        let marker = "/DeveloperRuntime/installed/"
+        guard let range = path.range(of: marker) else { return nil }
+        let rest = path[range.upperBound...]
+        return rest.split(separator: "/").first.map(String.init)
     }
 
     /// 把执行器落到 iSH 沙箱，并把这一步写进报告。

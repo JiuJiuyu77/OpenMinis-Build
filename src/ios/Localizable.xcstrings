@@ -39239,6 +39239,22 @@
         }
       }
     },
+    "Automatic is the recommended setting: it uses the native runtime only when it is installed and passes a real startup probe, otherwise commands stay in the iSH sandbox.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "推荐使用「自动」：只有运行时已安装并通过真实启动探针时才走原生，否则命令留在 iSH 沙箱。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "推薦使用「自動」：只有運行時已安裝並通過真實啓動探針時才走原生，否則命令留在 iSH 沙箱。"
+          }
+        }
+      }
+    },
     "Automatic retry": {
       "extractionState": "manual",
       "localizations": {
@@ -57658,6 +57674,22 @@
         }
       }
     },
+    "Codex versions": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex 版本"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Codex 版本"
+          }
+        }
+      }
+    },
     "Collapse Group": {
       "comment": "Accessibility label for the floating mini-bar that collapses the expanded group",
       "localizations": {
@@ -69036,6 +69068,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "無法加載圖片。"
+          }
+        }
+      }
+    },
+    "Could not load the release list. Check the network or the runtime repository.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法获取版本列表，请检查网络或运行时仓库。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法獲取版本列表，請檢查網絡或運行時倉庫。"
           }
         }
       }
@@ -117648,6 +117696,22 @@
         }
       }
     },
+    "Install another version": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安装其它版本"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安裝其它版本"
+          }
+        }
+      }
+    },
     "Install the OLLVM runtime from Settings → Developer Runtime.": {
       "localizations": {
         "en": {
@@ -117856,6 +117920,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "安装后大小：%@"
+          }
+        }
+      }
+    },
+    "Installed version": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已安装版本"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已安裝版本"
           }
         }
       }
@@ -126723,6 +126803,22 @@
         }
       }
     },
+    "Load available versions": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加载可用版本"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加載可用版本"
+          }
+        }
+      }
+    },
     "Load balance": {
       "extractionState": "manual",
       "localizations": {
@@ -127212,6 +127308,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "加載模型中…"
+          }
+        }
+      }
+    },
+    "Loading versions…": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在加载版本…"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在加載版本…"
           }
         }
       }
@@ -144447,6 +144559,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "沒有檢測到巨魔或越獄環境，原生運行時無法加載自己的動態庫（libiosexec），所有命令都會走 iSH 沙箱。"
+          }
+        }
+      }
+    },
+    "Neither TrollStore nor jailbreak (no native entitlement)": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "非巨魔 / 未越狱（无原生命令权限）"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "非巨魔 / 未越獄（無原生命令權限）"
           }
         }
       }
@@ -163715,6 +163843,22 @@
         }
       }
     },
+    "Options": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选项"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選項"
+          }
+        }
+      }
+    },
     "Or Configure Manually": {
       "localizations": {
         "de": {
@@ -174403,6 +174547,22 @@
         }
       }
     },
+    "Probe after reinstall: ": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重装后探针："
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重裝後探針："
+          }
+        }
+      }
+    },
     "Probe: ": {
       "localizations": {
         "zh-Hans": {
@@ -183856,6 +184016,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "重新整理工具"
+          }
+        }
+      }
+    },
+    "Refresh version list": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刷新版本列表"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "刷新版本列表"
           }
         }
       }
@@ -200090,6 +200266,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "運行時診斷"
+          }
+        }
+      }
+    },
+    "Runtime files are incomplete (zsh / libiosexec)": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "运行时文件不完整（zsh / libiosexec）"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "運行時文件不完整（zsh / libiosexec）"
+          }
+        }
+      }
+    },
+    "Runtime files are incomplete — reinstalling ": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "运行时文件不完整——正在重新安装 "
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "運行時文件不完整——正在重新安裝 "
           }
         }
       }
@@ -236388,6 +236596,22 @@
         }
       }
     },
+    "The damaged runtime was not installed by Developer Runtime, so it cannot be reinstalled automatically. Install Theos from Settings → Developer Runtime.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "损坏的运行时不是 Developer Runtime 安装的，无法自动重装。请到 设置 → Developer Runtime 安装 Theos。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "損壞的運行時不是 Developer Runtime 安裝的，無法自動重裝。請到 設置 → Developer Runtime 安裝 Theos。"
+          }
+        }
+      }
+    },
     "The environment allows native execution but the runtime failed its startup probe. Tap One-tap repair.": {
       "localizations": {
         "zh-Hans": {
@@ -243040,6 +243264,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "此分組用於語音輸出 — 僅列出能夠輸出音訊的模型。"
+          }
+        }
+      }
+    },
+    "This install is missing platform-application / no-sandbox, so no native process can start. Install the TIPA with TrollStore (the build already injects both entitlements).": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前安装缺少 platform-application / no-sandbox 权限，无法启动任何原生进程。请用 TrollStore 安装 TIPA（构建产物已注入这两个权限）。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "當前安裝缺少 platform-application / no-sandbox 權限，無法啓動任何原生進程。請用 TrollStore 安裝 TIPA（構建產物已注入這兩個權限）。"
           }
         }
       }
@@ -261667,6 +261907,22 @@
         }
       }
     },
+    "Use the on-device toolchain when it is installed and verified; otherwise stay in the iSH sandbox. If the runtime fails its startup probe, commands fall back to iSH automatically.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "运行时已安装并通过验证时使用设备原生工具链，否则留在 iSH 沙箱；探针失败会自动回退到 iSH。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "運行時已安裝並通過驗證時使用設備原生工具鏈，否則留在 iSH 沙箱；探針失敗會自動回退到 iSH。"
+          }
+        }
+      }
+    },
     "Use the toolchain installed from Developer Runtime instead of the shared copy.": {
       "localizations": {
         "en": {
@@ -264706,6 +264962,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "版本：%@"
+          }
+        }
+      }
+    },
+    "Versions come from the runtime repository's GitHub releases. Installing one replaces the current Codex runtime only — the rest of the toolchain is untouched.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "版本列表来自运行时仓库的 GitHub Releases。安装某个版本只会替换 Codex 运行时，其它工具链不受影响。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "版本列表來自運行時倉庫的 GitHub Releases。安裝某個版本只會替換 Codex 運行時，其它工具鏈不受影響。"
           }
         }
       }
@@ -280030,6 +280302,22 @@
         }
       }
     },
+    "missing": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "缺失"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "缺失"
+          }
+        }
+      }
+    },
     "model-id": {
       "localizations": {
         "de": {
@@ -281990,6 +282278,22 @@
         }
       }
     },
+    "signed with TrollStore entitlements": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已带巨魔签名权限"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已帶巨魔簽名權限"
+          }
+        }
+      }
+    },
     "ssh logins and remote commands, and every tool that connects through ssh: scp, sftp, rsync and git over SSH. Each new connection's handshake gets faster; the encryption of the data itself runs in libcrypto.": {
       "extractionState": "manual",
       "localizations": {
@@ -282768,6 +283072,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "thinkingLevel（字串）"
+          }
+        }
+      }
+    },
+    "truncated: ": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文件被截断："
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文件被截斷："
           }
         }
       }

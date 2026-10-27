@@ -326,7 +326,13 @@ struct NativeToolchain {
         ])
         let fm = FileManager.default
         var seen = Set<String>()
-        return candidates.filter { fm.isExecutableFile(atPath: $0) && seen.insert($0).inserted }
+        // 截断/非 Mach-O 的 shell 直接排除：它只会让 posix_spawn 返回 EBADEXEC，
+        // 然后在错误信息里伪装成「所有 shell 都启动不了」。
+        return candidates.filter {
+            fm.isExecutableFile(atPath: $0)
+                && runtimeBinaryDamage($0) == nil
+                && seen.insert($0).inserted
+        }
     }
 
     private static func discoverShell() -> String? {
@@ -358,6 +364,8 @@ struct NativeToolchain {
         candidates.append(URL(fileURLWithPath: "/var/jb/usr/bin/bash"))
         candidates.append(URL(fileURLWithPath: "/var/jb/usr/bin/zsh"))
         candidates.append(URL(fileURLWithPath: "/bin/sh"))
+        // 注意：这里故意不排除损坏的 shell。发现阶段要能指出「就是它坏了」，
+        // 真正 spawn 时的候选列表（allShellCandidates）才过滤损坏项。
         return candidates.first { fm.isExecutableFile(atPath: $0.path) }?.path
     }
 

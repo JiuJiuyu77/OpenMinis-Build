@@ -38,7 +38,7 @@ enum ToolExecutorMode: String, CaseIterable, Identifiable {
     var explanation: String {
         switch self {
         case .auto:
-            return AppLocalized("Stay in the iSH sandbox unless you turn on “Prefer custom runtime”, which switches to the on-device toolchain when one is installed.")
+            return AppLocalized("Use the on-device toolchain when it is installed and verified; otherwise stay in the iSH sandbox. If the runtime fails its startup probe, commands fall back to iSH automatically.")
         case .sandbox:
             return AppLocalized("Always run commands inside the sandboxed Alpine shell. Nothing runs natively on this device.")
         case .native:
@@ -111,15 +111,17 @@ final class ToolExecutorPreference: ObservableObject {
         self.reuseExternalRuntime = defaults.bool(forKey: Key.reuseExternalRuntime)
     }
 
-    /// 实际应当使用的执行器。把三个开关收敛成一个决定，
-    /// 让调用方（shell_execute / 编译工具）不必各自重复这套规则。
+    /// 实际应当使用的执行器。三个开关收敛成一个决定，调用方不再各自重复。
+    ///
+    /// 规则只有两条：
+    ///   1. 「沙箱」永远走 iSH；
+    ///   2. 「自动」在环境不可能原生执行（非巨魔 / 非越狱 / 无 Theos）时走 iSH，
+    ///      其余情况保持 auto —— 真正执行前还有一次探针，探针失败会回退 iSH。
     var resolvedExecutor: ToolExecutorMode {
         if sandboxMode { return .sandbox }
-        // 「自动」在不可能原生执行的环境里直接落到沙箱：否则探到一份外部
-        // 运行时就会把每条命令送去 dyld 里 abort（libiosexec / 134）。
-        if mode == .auto,
-           !MinisHostEnvironmentDetector.cached.environment.canRunNativeBinaries {
-            return .sandbox
+        if mode == .auto {
+            if !MinisHostEnvironmentDetector.cached.environment.canRunNativeBinaries { return .sandbox }
+            if !NativeToolchain.shared.isAvailable { return .sandbox }
         }
         return mode
     }
