@@ -180,7 +180,6 @@ struct SettingsSheet: View {
                         Label {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(verbatim: "模型编译配置")
-                                Text(verbatim: "Model Build Profiles · 模型侧参数")
                                     .font(.system(size: 9))
                                     .foregroundStyle(.secondary)
                             }
@@ -201,7 +200,6 @@ struct SettingsSheet: View {
                         Label {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(verbatim: "提示词注入")
-                                Text(verbatim: "Prompt Injection · 自定义系统指令")
                                     .font(.system(size: 9))
                                     .foregroundStyle(.secondary)
                             }
