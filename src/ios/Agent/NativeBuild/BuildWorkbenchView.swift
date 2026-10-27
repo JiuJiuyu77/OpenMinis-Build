@@ -11,7 +11,6 @@ import UniformTypeIdentifiers
 struct BuildWorkbenchView: View {
 
     @StateObject private var service = NativeBuildService.shared
-    @ObservedObject private var profileStore = BuildProfileStore.shared
     @State private var showPicker = false
     @State private var showArchivePicker = false
     @State private var showIPAPicker = false
@@ -21,7 +20,6 @@ struct BuildWorkbenchView: View {
     var body: some View {
         Form {
             toolchainNotice
-            buildProfileSection
             makeModeSection
             projectSection
             productSection
@@ -97,56 +95,6 @@ struct BuildWorkbenchView: View {
         } footer: {
             Text(service.makeMode.detail)
         }
-    }
-
-    // MARK: - 编译配置
-
-    /// 配置 = 工程参数 + 混淆强度 + 保护/输出开关的快照，换项目/换模型时一键套用。
-    private var buildProfileSection: some View {
-        Section {
-            ForEach(profileStore.profiles) { profile in
-                Button {
-                    profileStore.apply(profile)
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(verbatim: profile.name)
-                                .font(.subheadline)
-                                .foregroundStyle(.primary)
-                            Text(verbatim: profile.summary)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        if profileStore.matchesCurrentSettings(profile) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                        }
-                    }
-                }
-                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    Button(role: .destructive) {
-                        profileStore.remove(profile.id)
-                    } label: {
-                        Label(AppLocalized("Delete"), systemImage: "trash")
-                    }
-                }
-            }
-            Button {
-                profileStore.saveCurrent(named: nextProfileName())
-            } label: {
-                Label(AppLocalized("Save current settings as a profile"),
-                      systemImage: "square.and.arrow.down")
-            }
-        } header: {
-            Text(AppLocalized("Build profiles"))
-        } footer: {
-            Text(AppLocalized("A profile snapshots scheme, archs, obfuscation strength, protection and output switches. Project path is deliberately not part of it."))
-        }
-    }
-
-    private func nextProfileName() -> String {
-        "\(AppLocalized("Profile")) \(profileStore.profiles.count + 1)"
     }
 
     // MARK: - 工程
