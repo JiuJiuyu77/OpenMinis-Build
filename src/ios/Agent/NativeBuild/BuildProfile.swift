@@ -165,7 +165,8 @@ struct ModelBuildProfileSettingsView: View {
                         }
                     }
                     .padding(.vertical, 2)
-                    .onChange(of: profile) { _, newValue in
+                    // onChange(of:initial:_:) 需要 iOS 17，这里用兼容写法（部署目标是 16）。
+                    .onChange(of: profile) { newValue in
                         store.update(newValue)
                     }
                 }
