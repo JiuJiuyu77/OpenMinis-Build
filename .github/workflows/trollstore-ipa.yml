@@ -1,4 +1,7 @@
 name: TrollStore TIPA
+# [T-run-name] check 与 release 在运行列表里必须一眼可辨——两者都叫
+# "TrollStore TIPA" 时，看到 check 运行「没有产物」会被误判成构建失败。
+run-name: "${{ inputs.mode == 'check' && 'compile check' || 'TIPA release' }}"
 
 # 出 TrollStore 可直装的 .tipa（adhoc 签名 + 原生编译所需权限）
 # 触发：手动 / push tag
