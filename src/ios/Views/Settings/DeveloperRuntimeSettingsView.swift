@@ -283,6 +283,9 @@ struct DeveloperRuntimeSettingsView: View {
             if let path = manager.environment(for: descriptor.id)["PATH"] {
                 LabeledContent("PATH", value: path)
             }
+            if let report = manager.verification(for: descriptor.id) {
+                LabeledContent("Self-check", value: report.shortSummary)
+            }
         } header: {
             Text("Installed")
         } footer: {

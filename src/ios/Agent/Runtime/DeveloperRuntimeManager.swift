@@ -49,6 +49,9 @@ struct InstalledRuntimeRecord: Codable, Equatable {
     let sizeBytes: Int64
     let sdk: String?
     let provides: [String]
+    /// 装完那一刻按清单 `install` 块做的自检结论。
+    /// 旧记录没有这个字段（新增为可选），解码时按 nil 处理。
+    var verification: RuntimeVerificationReport?
 }
 
 enum RuntimeInstallState: Equatable {
@@ -199,41 +202,66 @@ final class DeveloperRuntimeManager: ObservableObject {
 
     /// Environment a tool process gets so it can use this runtime in place.
     ///
-    /// Theos archives carry `theos/` plus `usr/bin` and `sdks` at the root;
-    /// portable runtimes carry `bin/`. Both are exported rather than resolved
-    /// per runtime so a caller does not have to know which shape it installed.
+    /// 清单的 `install.environment` 是运行时自己的契约（Node 的
+    /// `CA_TOOL_NODE_RUNTIME_ROOT`、Theos 的 SDK 指向…），`install.path_entries`
+    /// 才是真正的 PATH 入口。两代归档布局（Theos 的 `theos/` vs portable 的
+    /// `bin/`）由 `RuntimeEnvironmentOverlay` 统一处理，调用方不必知道装的是哪种。
     func environment(for id: String) -> [String: String] {
-        guard records[id] != nil else { return [:] }
+        guard let descriptor = descriptor(id: id) else { return [:] }
         let root = DeveloperRuntimePaths.runtimeRoot(id: id)
-        let fm = FileManager.default
-        func existing(_ relative: String) -> String? {
-            let url = root.appendingPathComponent(relative, isDirectory: true)
-            return fm.fileExists(atPath: url.path) ? url.path : nil
+        let overlay = RuntimeEnvironmentOverlay.build(descriptor: descriptor, root: root)
+        var env = overlay.exports
+        if let prefix = overlay.pathPrefix {
+            env["PATH"] = prefix + ":/usr/bin:/bin"
         }
-        var env: [String: String] = [:]
-        let search = [existing("usr/bin"), existing("bin")].compactMap { $0 }
-        if !search.isEmpty {
-            env["PATH"] = (search + ["/usr/bin", "/bin"]).joined(separator: ":")
-        }
-        if let theos = existing("theos") {
-            env["THEOS"] = theos
-            // Theos keeps its SDKs inside the checkout (`$THEOS/sdks`), not at
-            // the archive root; point SDKROOT there so xcrun-free builds find
-            // iPhoneOS16.5.sdk without a second configuration step.
-            let sdks = URL(fileURLWithPath: theos).appendingPathComponent("sdks", isDirectory: true)
-            if fm.fileExists(atPath: sdks.path) { env["THEOS_SDKROOT"] = sdks.path }
-        }
-        env["MINIS_RUNTIME_ROOT"] = root.path
         return env
     }
 
-    /// Missing `requires` entries for `descriptor`, as manifest ids.
+    /// 安装记录里的自检结论（未装 / 旧记录时为 nil）。
+    func verification(for id: String) -> RuntimeVerificationReport? {
+        records[id]?.verification
+    }
+
+    /// 按 id 取清单条目（含字典键回填的 id）。
+    func descriptor(id: String) -> RuntimeDescriptor? {
+        runtimes.first { $0.id == id }
+    }
+
+    /// Missing dependencies for `descriptor`, as manifest ids.
+    ///
+    /// 两类依赖都要算：运行时级 `requires`（裸 id 或对象形式），以及能力级
+    /// `capabilities.<id>.requires` —— 后者才是「装的这个东西真能干活」的前提，
+    /// 例如 `node.native-addon` 依赖 theos 提供的 `ios.toolchain`。
     func missingRequirements(for descriptor: RuntimeDescriptor) -> [String] {
         let manifest = self.manifest
-        return (descriptor.requires ?? []).filter { id in
-            guard let dependency = manifest?.runtimes[id] else { return false }
-            return !state(for: dependencyWithID(dependency, id: id)).isInstalled
+        var missing: [String] = []
+        var seen = Set<String>()
+
+        func require(_ id: String) {
+            guard let dependency = manifest?.runtimes[id] else { return }
+            let state = self.state(for: dependencyWithID(dependency, id: id))
+            if !state.isInstalled, seen.insert(id).inserted {
+                missing.append(id)
+            }
         }
+
+        for requirement in descriptor.requires ?? [] {
+            require(requirement.id)
+        }
+        for (capability, doc) in descriptor.capabilities ?? [:] {
+            guard (descriptor.provides ?? []).contains(capability) else { continue }
+            for requirement in doc.requires {
+                if let id = requirement.id, manifest?.runtimes[id] != nil {
+                    require(id)
+                } else if let provided = requirement.provides,
+                          let provider = runtimes.first(where: {
+                              ($0.provides ?? []).contains(provided) && $0.id != descriptor.id
+                          }) {
+                    require(provider.id)
+                }
+            }
+        }
+        return missing
     }
 
     private func dependencyWithID(_ descriptor: RuntimeDescriptor, id: String) -> RuntimeDescriptor {
@@ -405,6 +433,31 @@ final class DeveloperRuntimeManager: ObservableObject {
             throw RuntimeInstallError.extractionFailed(error.localizedDescription)
         }
 
+        // 3.5 自检：按清单的 required_paths + probe 在 staging 里先验一遍。
+        // 坏包（缺 devkit / 缺 framework / probe 起不来）在这里失败，不进 installed/，
+        // 也不覆盖上一份可用的安装 —— 换版本失败时用户仍然留着一个能编译的 Theos。
+        await manager.publish(id, .verifying)
+        // 30 秒缓存的探测结果：沙盒/侧载环境下 probe 记 skipped，而不是判坏包。
+        let hostCanRunNative = MinisHostEnvironmentDetector.cached.environment.canRunNativeBinaries
+        let verification = await RuntimeInstallVerifier.verify(
+            descriptor: descriptor,
+            root: scratch,
+            canExecuteNative: hostCanRunNative)
+        guard verification.isAcceptable else {
+            try? fm.removeItem(at: scratch)
+            var parts: [String] = []
+            if let reason = verification.reason { parts.append(reason) }
+            if !verification.missingPaths.isEmpty {
+                parts.append(AppLocalized("Missing:") + " " +
+                             verification.missingPaths.prefix(6).joined(separator: ", "))
+            }
+            if let output = verification.probeOutput, !output.isEmpty {
+                parts.append(output.split(separator: "\n").prefix(4).joined(separator: " | "))
+            }
+            throw RuntimeInstallError.installFailed(
+                parts.isEmpty ? AppLocalized("Runtime self-check failed.") : parts.joined(separator: " — "))
+        }
+
         await manager.publish(id, .finalizing)
         let record = InstalledRuntimeRecord(
             id: id,
@@ -414,7 +467,8 @@ final class DeveloperRuntimeManager: ObservableObject {
             installedAt: Date(),
             sizeBytes: Self.directorySize(scratch),
             sdk: descriptor.sdk,
-            provides: descriptor.provides ?? [])
+            provides: descriptor.provides ?? [],
+            verification: verification)
 
         if let metadataURL = descriptor.metadataURL.flatMap(URL.init(string:)) {
             await fetchBundleMetadata(metadataURL, into: scratch)
@@ -452,7 +506,7 @@ final class DeveloperRuntimeManager: ObservableObject {
         // 安装了新运行时（可能就是 OLLVM 前端）后，OLLVM 可用性缓存必须失效，
         // 否则界面会一直显示「缺失」直到杀进程重开。
         await MainActor.run { RuntimeCapabilityNames.refreshOllvmProbe() }
-        logger.notice("Installed runtime \(id) \(descriptor.version) (\(record.sizeBytes) bytes)")
+        logger.notice("Installed runtime \(id) \(descriptor.version) (\(record.sizeBytes) bytes, self-check \(verification.status.rawValue))")
     }
 
     // MARK: - Unpacking
