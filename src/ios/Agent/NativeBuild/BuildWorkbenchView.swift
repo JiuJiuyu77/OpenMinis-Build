@@ -530,31 +530,3 @@ struct ArchivePickerView: UIViewControllerRepresentable {
 }
 
 // MARK: - 设置页入口
-
-extension ToolsSettingsView {
-    /// 编译工作台已迁到 设置 → Agent Runtime → 编译工作台（与 Executor /
-    /// Developer Runtime 相邻）。这里只留一行指路，避免出现两个入口。
-    @ViewBuilder
-    var nativeBuildSection: some View {
-        Section {
-            NavigationLink {
-                BuildWorkbenchView()
-            } label: {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(verbatim: "编译工作台")
-                        Text(verbatim: "已移至 设置 → Agent Runtime（这里也可进入）")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                } icon: {
-                    Image(systemName: "hammer.fill")
-                }
-            }
-        } footer: {
-            Text(verbatim: "编译工作台、运行时诊断与插件管理都在 设置 → Agent Runtime 里，和 Executor、Developer Runtime 放在一起。")
-        }
-    }
-}
-
-#endif
