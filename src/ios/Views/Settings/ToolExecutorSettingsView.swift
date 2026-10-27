@@ -37,40 +37,31 @@ struct ToolExecutorSettingsView: View {
             }
 
             Section {
-                Toggle(isOn: $preference.sandboxMode) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Sandbox mode")
-                        Text("Keep every command inside the iSH Alpine sandbox.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                DisclosureGroup {
+                    Toggle(isOn: $preference.preferCustomRuntime) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Prefer custom runtime")
+                            Text("Use the toolchain installed from Developer Runtime instead of the shared copy.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                }
-                Toggle(isOn: $preference.preferCustomRuntime) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Prefer custom runtime")
-                        Text("Use the toolchain installed from Developer Runtime instead of the shared copy.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                    Toggle(isOn: $preference.reuseExternalRuntime) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Reuse external runtime")
+                            Text("Also scan other apps' runtime folders (MT-Agent / CodexApp). Off by default: those copies cannot be loaded in a sandboxed build.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
                     }
+                } label: {
+                    Text(AppLocalized("Advanced"))
                 }
-                .disabled(preference.sandboxMode)
-                Toggle(isOn: $preference.reuseExternalRuntime) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Reuse external runtime")
-                        Text("Also scan other apps' runtime folders (MT-Agent / CodexApp). Off by default: those copies cannot be loaded in a sandboxed build.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .disabled(preference.sandboxMode)
             } header: {
-                Text("Native execution")
+                Text(AppLocalized("Options"))
             } footer: {
-                Text("Sandbox mode overrides the executor choice. Native execution needs TrollStore or a jailbreak; in an App Store build everything falls back to iSH.")
+                Text(AppLocalized("Automatic is the recommended setting: it uses the native runtime only when it is installed and passes a real startup probe, otherwise commands stay in the iSH sandbox."))
             }
-
-            environmentSection
-            repairSection
 
             Section {
                 LabeledContent("Effective executor", value: preference.resolvedExecutor.displayName)
@@ -113,6 +104,13 @@ struct ToolExecutorSettingsView: View {
         }
         .navigationTitle("Executor")
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: preference.mode) { newValue in
+            // 旧的「强制沙箱」开关只保留兼容：选了自动/原生就清掉它，
+            // 否则 resolvedExecutor 会永远返回 sandbox，设置看起来不生效。
+            if newValue != .sandbox, preference.sandboxMode {
+                preference.sandboxMode = false
+            }
+        }
         .onAppear {
             Task { await healthMonitor.refresh() }
             capabilities.registerBuiltinsIfNeeded()

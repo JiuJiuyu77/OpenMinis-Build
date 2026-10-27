@@ -271,6 +271,16 @@ final class DeveloperRuntimeManager: ObservableObject {
         }
     }
 
+    /// 安装并等待完成（「一键修复」用）。安装过程仍由 `tasks` 自己管理，
+    /// 这里只轮询它的存在，不复制一份安装逻辑。
+    func installAndWait(_ descriptor: RuntimeDescriptor, timeout: TimeInterval = 1800) async {
+        install(descriptor)
+        let deadline = Date().addingTimeInterval(timeout)
+        while tasks[descriptor.id] != nil && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
+    }
+
     func cancel(_ id: String) {
         guard let task = tasks[id], !task.isCancelled else { return }
         operations[id] = .cancelling

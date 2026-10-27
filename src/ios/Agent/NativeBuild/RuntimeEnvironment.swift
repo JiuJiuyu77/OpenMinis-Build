@@ -42,7 +42,7 @@ enum MinisHostEnvironment: String, Sendable {
         case .trollStore: return AppLocalized("TrollStore (巨魔)")
         case .jailbreakRootless: return AppLocalized("Jailbreak (rootless · 无根越狱)")
         case .jailbreakRootful: return AppLocalized("Jailbreak (rootful · 有根越狱)")
-        case .appSandbox: return AppLocalized("Neither TrollStore nor jailbreak (沙箱)")
+        case .appSandbox: return AppLocalized("Neither TrollStore nor jailbreak (no native entitlement)")
         case .unknown: return AppLocalized("Unknown")
         }
     }
@@ -126,7 +126,17 @@ enum MinisHostEnvironmentDetector {
         if hasDpkg { evidence.append("✓ /var/lib/dpkg/status") }
         if hasCydia { evidence.append("✓ /usr/libexec/cydia") }
 
-        // 4) 巨魔：TrollStore 的安装标记，或 App 自身路径里带 TrollStore。
+        // 4) 本进程的签名权限：这是「能不能 spawn 原生二进制」的硬条件。
+        //    TrollStore 安装的 TIPA 会带 platform-application / no-sandbox；
+        //    普通签名/自签工具安装的包没有，posix_spawn 一律 EPERM。
+        let noSandbox = entitlementBool("com.apple.private.security.no-sandbox")
+        let platformApp = entitlementBool("platform-application")
+        let getTaskAllow = entitlementBool("get-task-allow")
+        evidence.append((noSandbox ? "✓ " : "✗ ") + "com.apple.private.security.no-sandbox")
+        evidence.append((platformApp ? "✓ " : "✗ ") + "platform-application")
+        evidence.append((getTaskAllow ? "✓ " : "✗ ") + "get-task-allow")
+
+        // 5) 巨魔：TrollStore 的安装标记，或 App 自身路径里带 TrollStore。
         var trollStore = false
         for marker in ["/var/mobile/Library/TrollStore",
                        "/Applications/TrollStore.app",
@@ -147,11 +157,13 @@ enum MinisHostEnvironmentDetector {
             environment = .jailbreakRootless
         } else if hasDpkg || hasCydia {
             environment = .jailbreakRootful
-        } else if trollStore || !sandboxed {
-            // 没有越狱标记、但进程能写出容器：巨魔安装（no-sandbox 生效）。
+        } else if trollStore || (noSandbox && platformApp) {
+            // 有巨魔签名权限、且没有越狱目录：巨魔安装。
             environment = .trollStore
-            if !trollStore { evidence.append("✓ " + AppLocalized("process is not sandboxed — TrollStore signature")) }
+            if !trollStore { evidence.append("✓ " + AppLocalized("signed with TrollStore entitlements")) }
         } else {
+            // 没有 /var/jb，也没有 no-sandbox/platform-application：
+            // 即使能写某个目录，也 spawn 不了原生二进制。
             environment = .appSandbox
         }
 
@@ -161,6 +173,16 @@ enum MinisHostEnvironmentDetector {
                                           checkedAt: Date())
     }
 
+    /// 读取本进程的一项 entitlement。`SecTask` 是 Security 框架里读签名权限的
+    /// 唯一公开入口；失败时返回 false（宁可保守，也不要误报「可以原生执行」）。
+    private static func entitlementBool(_ key: String) -> Bool {
+        guard let task = MinisSecTaskCreateFromSelf(nil) else { return false }
+        guard let value = MinisSecTaskCopyValueForEntitlement(task, key as CFString, nil) else { return false }
+        if let number = value as? NSNumber { return number.boolValue }
+        if let bool = value as? Bool { return bool }
+        return true
+    }
+
     private static func canWriteSharedCaches() -> Bool {
         let fm = FileManager.default
         let dir = "/var/mobile/Library/Caches"
@@ -168,6 +190,64 @@ enum MinisHostEnvironmentDetector {
         guard fm.createFile(atPath: probe, contents: Data()) else { return false }
         try? fm.removeItem(atPath: probe)
         return true
+    }
+}
+
+// MARK: - 运行时完整性（zsh / libiosexec / make）
+
+/// 安装目录里「关键文件到底在不在、是不是 Mach-O、大小对不对」。
+/// 之前只看 `isExecutableFile`：一个 0 字节的 zsh 也算可执行，于是
+/// posix_spawn 直接 EBADEXEC，界面只显示「Every candidate shell failed」。
+enum RuntimeIntegrity {
+
+    struct Issue: Sendable, Identifiable {
+        let path: String
+        let reason: String
+        var id: String { path }
+    }
+
+    /// 关键文件最小体积（真实文件远大于此，只是用来识别截断/占位文件）。
+    private static let minimumSizes: [(String, Int)] = [
+        ("usr/bin/zsh", 150_000),
+        ("usr/bin/make", 100_000),
+        ("usr/lib/libiosexec.1.dylib", 32_000),
+    ]
+
+    static func inspect(theosRoot: String?) -> [Issue] {
+        guard let theosRoot, !theosRoot.isEmpty else { return [] }
+        let fm = FileManager.default
+        let runtimeRoot = URL(fileURLWithPath: theosRoot).deletingLastPathComponent()
+        var issues: [Issue] = []
+
+        for (rel, minSize) in minimumSizes {
+            let path = runtimeRoot.appendingPathComponent(rel).path
+            if !fm.fileExists(atPath: path) {
+                issues.append(Issue(path: path, reason: AppLocalized("missing")))
+                continue
+            }
+            let size = ((try? fm.attributesOfItem(atPath: path))?[.size] as? Int) ?? 0
+            if size < minSize {
+                issues.append(Issue(path: path, reason: AppLocalized("truncated: ") + "\(size) bytes"))
+                continue
+            }
+            if let damage = runtimeBinaryDamage(path) {
+                issues.append(Issue(path: path, reason: damage))
+            }
+        }
+
+        let common = URL(fileURLWithPath: theosRoot).appendingPathComponent("makefiles/common.mk").path
+        if !fm.fileExists(atPath: common) {
+            issues.append(Issue(path: common, reason: AppLocalized("missing")))
+        }
+        return issues
+    }
+
+    /// 一句话摘要，给诊断页 / 探针详情用。
+    static func summary(theosRoot: String?) -> String? {
+        let issues = inspect(theosRoot: theosRoot)
+        guard let first = issues.first else { return nil }
+        let more = issues.count > 1 ? " (+" + String(issues.count - 1) + ")" : ""
+        return URL(fileURLWithPath: first.path).lastPathComponent + ": " + first.reason + more
     }
 }
 
@@ -186,6 +266,8 @@ enum NativeRuntimeFailure: String, Sendable, Equatable {
     case dyldBlocked
     /// 进程起来了但被信号打死（134 = SIGABRT，多数是 dyld abort）。
     case crashed
+    /// 运行时文件不完整：zsh 被截断、libiosexec 缺失、make 不在。
+    case runtimeDamaged
     case timedOut
     case unknown
 
@@ -199,6 +281,7 @@ enum NativeRuntimeFailure: String, Sendable, Equatable {
         case .spawnDenied: return AppLocalized("Cannot spawn the runtime shell")
         case .dyldBlocked: return AppLocalized("Runtime libraries cannot be loaded (libiosexec)")
         case .crashed: return AppLocalized("Runtime shell crashed")
+        case .runtimeDamaged: return AppLocalized("Runtime files are incomplete (zsh / libiosexec)")
         case .timedOut: return AppLocalized("Runtime shell timed out")
         case .unknown: return AppLocalized("Runtime check failed")
         }
@@ -207,7 +290,7 @@ enum NativeRuntimeFailure: String, Sendable, Equatable {
     /// 这类错误能不能靠「切回 iSH」立刻恢复。
     var workaroundIsSandbox: Bool {
         switch self {
-        case .spawnDenied, .dyldBlocked, .crashed, .timedOut, .unknown: return true
+        case .spawnDenied, .dyldBlocked, .crashed, .runtimeDamaged, .timedOut, .unknown: return true
         case .none, .toolchainMissing, .shellMissing: return false
         }
     }
@@ -308,6 +391,19 @@ final class NativeRuntimeHealthMonitor: ObservableObject {
                                       shell: candidate, root: root.path)
             if firstFailure == nil { firstFailure = classified }
         }
+        if var failure = firstFailure {
+            // spawn 全失败时补一条「文件本身是否完整」的结论：
+            // zsh 被截断/缺失时，错误码只会是 EBADEXEC，看不到真正原因。
+            if let summary = RuntimeIntegrity.summary(theosRoot: root.path) {
+                failure = NativeRuntimeHealth(failure: .runtimeDamaged,
+                                              shell: failure.shell,
+                                              theosRoot: failure.theosRoot,
+                                              exitCode: failure.exitCode,
+                                              detail: summary,
+                                              checkedAt: failure.checkedAt)
+            }
+            return failure
+        }
         return firstFailure ?? NativeRuntimeHealth(failure: .unknown, shell: toolchain.shellPath,
                                                    theosRoot: root.path, exitCode: 0,
                                                    detail: "", checkedAt: Date())
@@ -339,6 +435,11 @@ final class NativeRuntimeHealthMonitor: ObservableObject {
     /// 从一坨日志里挑出最能说明问题的那一行。
     nonisolated static func shortDetail(_ output: String) -> String {
         let lines = output.split(separator: "\n").map(String.init)
+        // 「Shells tried」里每条 `path → 原因` 才是关键；优先带出来。
+        let tried = lines.filter { $0.contains("→") }
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .prefix(2)
+        if !tried.isEmpty { return tried.joined(separator: " | ") }
         let markers = ["libiosexec", "library not loaded", "dyld", "could not start",
                        "posix_spawn", "sandbox"]
         if let hit = lines.first(where: { line in
@@ -350,3 +451,17 @@ final class NativeRuntimeHealthMonitor: ObservableObject {
         return lines.first?.trimmingCharacters(in: .whitespaces) ?? ""
     }
 }
+
+
+// MARK: - 签名权限读取
+//
+// `SecTask*` 在 Security.framework 里存在，但没有公开头文件。按符号声明比
+// 引入私有头更稳：编译期只需要这两个原型，链接期由 Security 提供。
+
+@_silgen_name("SecTaskCreateFromSelf")
+private func MinisSecTaskCreateFromSelf(_ allocator: CFAllocator?) -> CFTypeRef?
+
+@_silgen_name("SecTaskCopyValueForEntitlement")
+private func MinisSecTaskCopyValueForEntitlement(_ task: CFTypeRef?,
+                                                 _ entitlement: CFString,
+                                                 _ error: UnsafeMutablePointer<Unmanaged<CFError>?>?) -> CFTypeRef?

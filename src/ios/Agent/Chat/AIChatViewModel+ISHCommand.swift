@@ -40,13 +40,16 @@ extension AIChatViewModel {
         }
         let executor = decision.executor
         if executor != .sandbox {
-            let wantsNative = executor == .native
-                || (executor == .auto && decision.customRuntimePreferred)
+            // 简化后：auto 也允许尝试原生；真正的闸门是下面的真实探针。
+            let wantsNative = (executor == .native || executor == .auto)
             let nativeReady = await MainActor.run { NativeToolchain.shared.isAvailable }
             if wantsNative && !nativeReady {
-                return CommandResult(
-                    output: "Error: the native runtime was selected in Settings but no toolchain was found. Install it from Settings → Developer Runtime, or switch the executor back to Automatic.",
-                    exitCode: 127)
+                if executor == .native {
+                    return CommandResult(
+                        output: "Error: 原生执行器已选中，但没有找到可用的 Theos 运行时。请到 设置 → Developer Runtime 安装，或把执行器切成「自动 / iSH 沙箱」。",
+                        exitCode: 127)
+                }
+                // auto：没有工具链就安静地走 iSH，不打扰用户。
             }
             // [T-executor-auto-fix] 以前这里只看 nativeReady：只要设备上探测到
             // 工具链，auto 模式也会把命令切到原生执行，与上面「auto 默认留在 iSH、
