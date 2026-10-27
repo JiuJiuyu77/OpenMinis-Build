@@ -36,6 +36,9 @@ enum NativeBuildTool {
                                         description: "Run `make clean` before packaging. Default false."),
                 "extra": AgentToolParam(type: .string,
                                         description: "Extra make arguments appended verbatim, e.g. 'DEBUG=0'."),
+                "make_mode": AgentToolParam(type: .string,
+                                            description: "How to handle the build file: project (use the Makefile in the project, default), generate (auto-generate a Theos Makefile from sources when missing, then build), direct (skip make entirely and compile with clang; experimental).",
+                                            enumValues: ["project", "generate", "direct"]),
                 "profile": AgentToolParam(type: .string,
                                           description: "Name of a saved build profile (device UI: 编译工作台 → 编译配置). Its scheme/archs/obfuscation/protection/output become defaults; arguments you pass explicitly still win."),
                 "obfuscation": AgentToolParam(type: .string,
@@ -188,6 +191,7 @@ enum NativeBuildTool {
             return ("Error: product=ipaShell needs shell_ipa (absolute path of the .ipa to inject into).", false)
         }
 
+        let makeMode = NativeMakeMode(rawValue: (args["make_mode"] as? String) ?? "project") ?? .project
         let config = NativeBuildConfig(projectPath: path,
                                        scheme: scheme,
                                        archs: archs,
@@ -201,7 +205,14 @@ enum NativeBuildTool {
                                        product: product,
                                        incremental: incremental,
                                        protection: protection,
-                                       shellSourceIPA: shellIPA)
+                                       shellSourceIPA: shellIPA,
+                                       makeMode: makeMode,
+                                       generatedMakefile: makeMode == .generate
+                                           ? MakefileGenerator.makefile(for: path) : nil,
+                                       directCommand: makeMode == .direct
+                                           ? MakefileGenerator.directCommand(for: path,
+                                                                             theosRoot: NativeToolchain.shared.theosRoot)
+                                           : nil)
 
         let result = await NativeBuildService.runBuild(config)
 
