@@ -70,6 +70,12 @@ struct NativeBuildConfig {
     var shellSourceIPA: String = ""
     /// 打壳注入的 dylib 名（默认用工程编出来的那个）。
     var shellDylibName: String = ""
+    /// 没有 Makefile 时怎么办。默认 `.project`，与旧行为一致。
+    var makeMode: NativeMakeMode = .project
+    /// `.generate` 模式预生成的 Makefile 内容（service 构造配置时扫源码填入）。
+    var generatedMakefile: String? = nil
+    /// `.direct` 模式预拼好的 clang 命令（跳过 make）。
+    var directCommand: String? = nil
 
     /// 实际要执行的 make 目标。
     var makeGoal: String {
@@ -118,8 +124,22 @@ struct NativeBuildConfig {
     }
 
     var command: String {
+        // `.direct`：完全绕过 make。
+        if let directCommand, !directCommand.isEmpty { return directCommand }
+
         let jobCount = jobs > 0 ? jobs : 4
         var cmd = (["make -j\(jobCount) \(makeGoal)"] + makeVariables).joined(separator: " ")
+
+        // `.generate`：工程里没有 Makefile 时，先把它写出来再编译。
+        // 用 `[ ! -f Makefile ]` 保护，绝不覆盖用户手写的 Makefile。
+        if let generatedMakefile, !generatedMakefile.isEmpty {
+            let eof = "MINIS_GENERATED_MAKEFILE"
+            cmd = "if [ ! -f Makefile ]; then\n"
+                + "  echo '▸ 工程没有 Makefile，正在按源码自动生成…'\n"
+                + "  cat > Makefile <<'" + eof + "'\n" + generatedMakefile + "\n" + eof + "\n"
+                + "else\n  echo '▸ 使用工程已有的 Makefile'\nfi\n"
+                + cmd
+        }
         // 「构建前清理」勾了，或者用户关掉了增量编译，都要先 clean。
         if cleanBeforeBuild || !incremental {
             cmd = "echo '▸ 清理旧产物…'\nmake clean >/dev/null 2>&1 || true\n" + cmd
@@ -159,6 +179,8 @@ final class NativeBuildService: ObservableObject {
     @Published var cflags: String
     @Published var ldflags: String
     @Published var jobs: Int
+    /// 没有 Makefile 时怎么办（`.project` / `.generate` / `.direct`）。
+    @Published var makeMode: NativeMakeMode = .project
     @Published var packageOnly: Bool
     @Published var product: BuildProductKind
     @Published var incremental: Bool
@@ -255,7 +277,14 @@ final class NativeBuildService: ObservableObject {
                           product: product,
                           incremental: incremental,
                           protection: protection,
-                          shellSourceIPA: shellSourceIPA)
+                          shellSourceIPA: shellSourceIPA,
+                          makeMode: makeMode,
+                          generatedMakefile: makeMode == .generate
+                              ? MakefileGenerator.makefile(for: projectPath) : nil,
+                          directCommand: makeMode == .direct
+                              ? MakefileGenerator.directCommand(for: projectPath,
+                                                                theosRoot: NativeToolchain.shared.theosRoot)
+                              : nil)
     }
 
     var toolchainReady: Bool { NativeToolchain.shared.isAvailable }
