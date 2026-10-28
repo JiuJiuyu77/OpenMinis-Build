@@ -113,7 +113,7 @@ enum RuntimeSigner {
         }
         guard let entitlements = entitlementsPlist() else {
             return .failed(AppLocalized("This app is not signed with native entitlements, so runtime binaries cannot be made executable."),
-                           ldid: ldid.path)
+                           ldid: ldid?.path)
         }
 
         var signed = 0
@@ -197,7 +197,7 @@ enum RuntimeSigner {
                                  reason: codexSign == nil
                                     ? AppLocalized("codex-sign is not bundled, so the App Store-style CodeDirectory is missing.")
                                     : nil,
-                                 ldidPath: ldid.path, codexSignPath: codexSign?.path, checkedAt: Date())
+                                 ldidPath: ldid?.path, codexSignPath: codexSign?.path, checkedAt: Date())
     }
 
     /// 给**构建产物**签名（NativeBuild 的 dylib / 打壳后的 App 主二进制）。
@@ -275,7 +275,7 @@ enum RuntimeSigner {
                                      signedCount: signed, failedPaths: failed,
                                      reason: String(lastOutput.split(separator: "\n").suffix(3)
                                                     .joined(separator: " | ").prefix(400)),
-                                     ldidPath: ldid?.path, codexSignPath: codexSign?.path, checkedAt: Date())
+                                     ldidPath: ldid.path, codexSignPath: codexSign?.path, checkedAt: Date())
         }
         return RuntimeSignReport(status: codexSign == nil ? .adhocOnly : .signed,
                                  mode: codexSign == nil ? "ldid" : "ldid+codex-sign",
@@ -283,7 +283,7 @@ enum RuntimeSigner {
                                  reason: codexSign == nil
                                     ? AppLocalized("codex-sign is not bundled, so the App Store-style CodeDirectory is missing.")
                                     : nil,
-                                 ldidPath: ldid?.path, codexSignPath: codexSign?.path, checkedAt: Date())
+                                 ldidPath: ldid.path, codexSignPath: codexSign?.path, checkedAt: Date())
     }
 
     // MARK: - 工具定位
