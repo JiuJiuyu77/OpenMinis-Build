@@ -338,17 +338,22 @@ enum NativeSpawnIdentity {
         typealias Persona = @convention(c) (UnsafeMutablePointer<posix_spawnattr_t?>, uid_t, UInt32) -> Int32
         typealias Identity = @convention(c) (UnsafeMutablePointer<posix_spawnattr_t?>, UInt32) -> Int32
         let handle = UnsafeMutableRawPointer(bitPattern: -2)
-        guard let persona = dlsym(handle, "posix_spawnattr_set_persona_np"),
-              let uid = dlsym(handle, "posix_spawnattr_set_persona_uid_np"),
-              let gid = dlsym(handle, "posix_spawnattr_set_persona_gid_np") else { return ENOTSUP }
+        // MT's availability gate requires set_persona_np; uid/gid APIs are
+        // optional refinements. Preserve native caller identity if they are absent.
+        guard let persona = dlsym(handle, "posix_spawnattr_set_persona_np") else { return ENOTSUP }
+        typealias Identity = @convention(c) (UnsafeMutablePointer<posix_spawnattr_t?>, UInt32) -> Int32
         let setPersona = unsafeBitCast(persona, to: Persona.self)
-        let setUID = unsafeBitCast(uid, to: Identity.self)
-        let setGID = unsafeBitCast(gid, to: Identity.self)
         let personaResult = setPersona(&attributes, 99, 1)
         guard personaResult == 0 else { return personaResult }
-        let uidResult = setUID(&attributes, 0)
-        guard uidResult == 0 else { return uidResult }
-        return setGID(&attributes, 0)
+        if let uid = dlsym(handle, "posix_spawnattr_set_persona_uid_np") {
+            let result = unsafeBitCast(uid, to: Identity.self)(&attributes, 0)
+            guard result == 0 else { return result }
+        }
+        if let gid = dlsym(handle, "posix_spawnattr_set_persona_gid_np") {
+            let result = unsafeBitCast(gid, to: Identity.self)(&attributes, 0)
+            guard result == 0 else { return result }
+        }
+        return 0
         #else
         return 0
         #endif

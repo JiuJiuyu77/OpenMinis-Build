@@ -92,148 +92,108 @@ enum RuntimeSigner {
                             canExecuteNative: Bool,
                             timeout: TimeInterval = 180) -> RuntimeSignReport {
         let spec = descriptor.installSpecOrNone
-        let targets = spec.signTargets(in: root)
-        let unsafe = (targets.entitlements + targets.adhoc).filter {
-            RuntimePathPolicy.containedURL($0, in: root) == nil
-        }
+        let declared = spec.signTargets(in: root)
+        let allDeclared = declared.entitlements + declared.adhoc
+        let unsafe = allDeclared.filter { RuntimePathPolicy.containedURL($0, in: root) == nil }
         guard unsafe.isEmpty else { return .failed("Unsafe signing targets", paths: unsafe) }
-        let entitlementsTargets = targets.entitlements.compactMap { RuntimePathPolicy.containedURL($0, in: root) }
-        let adhocTargets = targets.adhoc.compactMap { RuntimePathPolicy.containedURL($0, in: root) }
-
-        guard !entitlementsTargets.isEmpty || !adhocTargets.isEmpty else {
-            return RuntimeSignReport(status: .skipped, mode: nil, signedCount: 0, failedPaths: [],
-                                     reason: AppLocalized("This runtime declares no binaries to sign."),
-                                     ldidPath: nil, codexSignPath: nil, checkedAt: Date())
-        }
         guard canExecuteNative else {
             return RuntimeSignReport(status: .skipped, mode: nil, signedCount: 0, failedPaths: [],
                                      reason: AppLocalized("Cannot run the signing tools in this environment."),
-                                     ldidPath: nil, codexSignPath: nil, checkedAt: Date())
+                                     ldidPath: locateLdid(stagingRoot: root)?.path,
+                                     codexSignPath: locateCodexSign()?.path, checkedAt: Date())
+        }
+        guard let codexSign = locateCodexSign() else {
+            return .failed(AppLocalized("codex-sign is required for native runtime installation; the helper is not available."))
         }
         let ldid = locateLdid(stagingRoot: root)
-        let codexSign = locateCodexSign()
         let overlay = RuntimeEnvironmentOverlay.build(descriptor: descriptor, root: root)
         var signingEnvironment = ProcessInfo.processInfo.environment
         signingEnvironment.merge(overlay.exports) { _, runtime in runtime }
         if let prefix = overlay.pathPrefix {
             signingEnvironment["PATH"] = prefix + ":" + (signingEnvironment["PATH"] ?? "/usr/bin:/bin")
         }
-        guard ldid != nil || codexSign != nil else {
-            return .failed(AppLocalized("Neither ldid nor codex-sign was found."))
-        }
         let entitlements = entitlementsPlist() ?? [:]
-        guard entitlementsTargets.isEmpty || !entitlements.isEmpty else {
+        guard declared.entitlements.isEmpty || !entitlements.isEmpty else {
             return .failed(AppLocalized("This app is not signed with native entitlements, so runtime binaries cannot be made executable."),
-                           ldid: ldid?.path)
+                           ldid: ldid?.path, codex: codexSign.path)
         }
         let plistURL = entitlements.isEmpty ? nil : writeTemporaryPlist(entitlements)
-        guard entitlements.isEmpty || plistURL != nil else {
-            return .failed("Cannot write signing entitlements", ldid: ldid?.path)
+        guard declared.entitlements.isEmpty || plistURL != nil else {
+            return .failed("Cannot write signing entitlements", ldid: ldid?.path, codex: codexSign.path)
         }
         defer { if let plistURL { try? FileManager.default.removeItem(at: plistURL) } }
-        // A cold-install ldid must gain execution trust BEFORE we run it.
-        // Ad-hoc alone is not a TrollStore bootstrap. The standalone signer
-        // defaults to the CoreTrust mode, with our own (not MT's) entitlements.
-        if let ldid, let codexSign,
-           ldid.path.hasPrefix(root.standardizedFileURL.path + "/") {
-            var bootstrapArguments = plistURL.map { ["--entitlements", $0.path] } ?? []
-            bootstrapArguments.append(ldid.path)
-            let bootstrap = RuntimeProbeRunner.run(executable: codexSign.path,
-                arguments: bootstrapArguments, environment: signingEnvironment,
-                workingDirectory: root.path, timeout: timeout)
-            guard bootstrap.spawnError == nil, !bootstrap.timedOut, bootstrap.status == 0 else {
-                return .failed(bootstrap.spawnError ?? bootstrap.output, paths: [ldid.path],
-                               ldid: ldid.path, codex: codexSign.path)
+
+        func machOTargets(_ paths: [String]) -> (targets: [URL], missing: [String]) {
+            var result: [URL] = []
+            var missing: [String] = []
+            var seen = Set<String>()
+            for path in paths {
+                guard let candidate = RuntimePathPolicy.containedURL(path, in: root) else {
+                    missing.append(path); continue
+                }
+                guard FileManager.default.fileExists(atPath: candidate.path) else {
+                    missing.append(path); continue
+                }
+                let resolved = candidate.resolvingSymlinksInPath()
+                guard FileManager.default.fileExists(atPath: resolved.path) else {
+                    missing.append(path); continue
+                }
+                if isMachO(resolved), seen.insert(resolved.path).inserted { result.append(resolved) }
             }
+            return (result, missing)
+        }
+        let noEnt = machOTargets(declared.adhoc)
+        let privileged = machOTargets(declared.entitlements)
+        let missing = noEnt.missing + privileged.missing
+        guard missing.isEmpty else {
+            return .failed("Declared signing target is missing", paths: missing,
+                           ldid: ldid?.path, codex: codexSign.path)
+        }
+        let total = noEnt.targets.count + privileged.targets.count
+        guard total > 0 else {
+            return .failed("No Mach-O signing targets were found in the runtime")
         }
         var signed = 0
         var failed: [String] = []
         var lastOutput = ""
-
-        var seenTargets = Set<String>()
-        for target in entitlementsTargets + adhocTargets {
-            let resolved = target.resolvingSymlinksInPath()
-            guard seenTargets.insert(resolved.path).inserted else { continue }
-            let isAdhocOnly = adhocTargets.contains(target)
-            guard FileManager.default.fileExists(atPath: target.path) else {
-                failed.append(target.path)
-                lastOutput = "Declared signing target is missing"
-                continue
+        func signBatches(_ targets: [URL], with plist: URL?) -> Bool {
+            let batchSize = 16
+            var index = 0
+            while index < targets.count {
+                let end = min(index + batchSize, targets.count)
+                let batch = Array(targets[index..<end])
+                var arguments: [String] = []
+                if let plist { arguments += ["--entitlements", plist.path] }
+                arguments += batch.map(\.path)
+                let result = RuntimeProbeRunner.run(executable: codexSign.path,
+                                                    arguments: arguments,
+                                                    environment: signingEnvironment,
+                                                    workingDirectory: root.path,
+                                                    timeout: timeout)
+                lastOutput = result.output
+                guard result.spawnError == nil, !result.timedOut, result.status == 0 else {
+                    failed += batch.map(\.path)
+                    return false
+                }
+                signed += batch.count
+                index = end
             }
-            guard isMachO(target) else { continue }
-            let name = target.lastPathComponent
-
-            // 1. 第一段签名：优先 ldid（能写 entitlements）；Theos 运行时的 ldid
-            //    自己也可能还没签名（引导期），那就让 codex-sign 先做一次 adhoc。
-            var adhocDone = false
-            if let ldid {
-                let ldidArguments = isAdhocOnly || entitlements.isEmpty
-                    ? ["-S", target.path]
-                    : ["-S" + (plistURL?.path ?? ""), target.path]
-                let ldidResult = RuntimeProbeRunner.run(executable: ldid.path,
-                                                        arguments: ldidArguments,
-                                                        environment: signingEnvironment,
-                                                        workingDirectory: root.path,
-                                                        timeout: timeout)
-                lastOutput = ldidResult.output
-                adhocDone = ldidResult.spawnError == nil && ldidResult.status == 0
-            }
-            if !adhocDone, let codexSign {
-                let bootstrap = RuntimeProbeRunner.run(executable: codexSign.path,
-                                                       arguments: ["--adhoc-only", target.path],
-                                                       environment: signingEnvironment,
-                                                       workingDirectory: root.path,
-                                                       timeout: timeout)
-                lastOutput = bootstrap.output
-                adhocDone = bootstrap.spawnError == nil && bootstrap.status == 0
-            }
-            if !adhocDone {
-                failed.append(name)
-                continue
-            }
-
-            // 2. codex-sign：补 App Store 形态的 CodeDirectory。
-            guard let codexSign else {
-                signed += 1 // adhoc 已成功，整体降级为 adhocOnly
-                continue
-            }
-            var codexArguments: [String] = []
-            // No host entitlements does NOT mean no CoreTrust signature.
-            // MT also treats these as separate axes; do not leave frameworks
-            // ad-hoc-only merely because they must not receive executable privileges.
-            if !isAdhocOnly, let plistURL {
-                codexArguments.append(contentsOf: ["--entitlements", plistURL.path])
-            }
-            codexArguments.append(target.path)
-            let codexResult = RuntimeProbeRunner.run(executable: codexSign.path,
-                                                     arguments: codexArguments,
-                                                     environment: signingEnvironment,
-                                                     workingDirectory: root.path,
-                                                     timeout: timeout)
-            lastOutput = codexResult.output
-            if codexResult.spawnError != nil || codexResult.status != 0 {
-                failed.append(name)
-                continue
-            }
-            signed += 1
+            return true
         }
-
-        if !failed.isEmpty {
+        // Libraries/tools without host entitlements are signed first so their
+        // dependency closure is trusted before privileged entry points run.
+        _ = signBatches(noEnt.targets, with: nil)
+        if failed.isEmpty { _ = signBatches(privileged.targets, with: plistURL) }
+        guard failed.isEmpty else {
             let snippet = lastOutput.split(separator: "\n").suffix(3).joined(separator: " | ")
-            return RuntimeSignReport(status: .failed, mode: codexSign == nil ? "ldid" : "ldid+codex-sign",
+            return RuntimeSignReport(status: .failed, mode: "codex-sign-coretrust",
                                      signedCount: signed, failedPaths: failed,
-                                     reason: snippet.isEmpty
-                                        ? AppLocalized("Signing failed.")
-                                        : String(snippet.prefix(400)),
-                                     ldidPath: ldid?.path, codexSignPath: codexSign?.path, checkedAt: Date())
+                                     reason: snippet.isEmpty ? AppLocalized("Signing failed.") : String(snippet.prefix(400)),
+                                     ldidPath: ldid?.path, codexSignPath: codexSign.path, checkedAt: Date())
         }
-        let mode = codexSign == nil ? "ldid" : "ldid+codex-sign"
-        let status: RuntimeSignReport.Status = codexSign == nil ? .adhocOnly : .signed
-        return RuntimeSignReport(status: status, mode: mode, signedCount: signed, failedPaths: [],
-                                 reason: codexSign == nil
-                                    ? AppLocalized("codex-sign is not bundled, so the App Store-style CodeDirectory is missing.")
-                                    : nil,
-                                 ldidPath: ldid?.path, codexSignPath: codexSign?.path, checkedAt: Date())
+        return RuntimeSignReport(status: .signed, mode: "codex-sign-coretrust",
+                                 signedCount: signed, failedPaths: [], reason: nil,
+                                 ldidPath: ldid?.path, codexSignPath: codexSign.path, checkedAt: Date())
     }
 
     /// 给**构建产物**签名（NativeBuild 的 dylib / 打壳后的 App 主二进制）。

@@ -87,14 +87,14 @@ class RuntimeInstallSourceContract(unittest.TestCase):
         text = source("RuntimeSigning").split("static func signArtifacts", 1)[0]
         self.assertIn("locateLdid(stagingRoot: root)", text)
         self.assertIn("signingEnvironment.merge(overlay.exports)", text)
-        self.assertIn('bootstrapArguments.append(ldid.path)', text)
-        self.assertNotIn('["--adhoc-only", ldid.path]', text)
-        final_sign = text.split('var codexArguments: [String] = []', 1)[1].split('codexArguments.append(target.path)', 1)[0]
-        self.assertNotIn('--adhoc-only', final_sign)
-        self.assertGreaterEqual(text.count("environment: signingEnvironment"), 4)
+        self.assertIn('codex-sign is required for native runtime installation', text)
+        self.assertIn('let batchSize = 16', text)
+        self.assertIn('signBatches(noEnt.targets, with: nil)', text)
+        self.assertIn('signBatches(privileged.targets, with: plistURL)', text)
+        self.assertIn('mode: "codex-sign-coretrust"', text)
         self.assertIn("Declared signing target is missing", text)
         self.assertIn("Cannot write signing entitlements", text)
-        self.assertIn("seenTargets.insert(resolved.path)", text)
+        self.assertIn("resolvingSymlinksInPath()", text)
 
     def test_spawn_root_identity_cwd_and_fd_ownership(self):
         text = source("RuntimeInstallVerifier")

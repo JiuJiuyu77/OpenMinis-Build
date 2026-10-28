@@ -492,6 +492,16 @@ final class DeveloperRuntimeManager: ObservableObject {
             throw RuntimeInstallError.extractionFailed(error.localizedDescription)
         }
 
+        // Fetch and bind sidecar inventory to the verified archive before it
+        // is allowed to influence signing. Never accept stale/unmatched lists.
+        if let metadataURL = descriptor.metadataURL.flatMap(URL.init(string:)) {
+            guard await fetchBundleMetadata(metadataURL, into: scratch,
+                                            expectedRevision: descriptor.revision,
+                                            expectedArchiveSHA256: descriptor.archiveSHA256) else {
+                throw RuntimeInstallError.installFailed("Runtime metadata is missing or does not match the verified archive")
+            }
+        }
+
         // 3.5 自检：按清单的 required_paths + probe 在 staging 里先验一遍。
         // 坏包（缺 devkit / 缺 framework / probe 起不来）在这里失败，不进 installed/，
         // 也不覆盖上一份可用的安装 —— 换版本失败时用户仍然留着一个能编译的 Theos。
@@ -539,9 +549,6 @@ final class DeveloperRuntimeManager: ObservableObject {
             verification: verification,
             signing: signing)
 
-        if let metadataURL = descriptor.metadataURL.flatMap(URL.init(string:)) {
-            await fetchBundleMetadata(metadataURL, into: scratch)
-        }
         try Self.writeRecord(record, into: scratch)
         try Task.checkCancellation()
 
@@ -868,19 +875,30 @@ final class DeveloperRuntimeManager: ObservableObject {
         partial.deletingPathExtension()
     }
 
-    private nonisolated static func fetchBundleMetadata(_ url: URL, into directory: URL) async {
+    private nonisolated static func fetchBundleMetadata(_ url: URL,
+                                                        into directory: URL,
+                                                        expectedRevision: String?,
+                                                        expectedArchiveSHA256: String) async -> Bool {
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                return
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 60
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse,
+                  (200..<300).contains(http.statusCode), data.count <= 4 * 1024 * 1024,
+                  let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let revision = object["revision"] as? String,
+                  let archiveSHA256 = object["archive_sha256"] as? String,
+                  archiveSHA256.lowercased() == expectedArchiveSHA256.lowercased(),
+                  expectedRevision == nil || revision.lowercased() == expectedRevision!.lowercased() else {
+                logger.error("Runtime sidecar did not match the verified archive: \(url.lastPathComponent)")
+                return false
             }
-            try data.write(to: directory.appendingPathComponent("runtime-bundle.json"),
-                           options: .atomic)
+            let destination = directory.appendingPathComponent("runtime-bundle.json")
+            try data.write(to: destination, options: .atomic)
+            return true
         } catch {
-            // Metadata is advisory (post-install layout hints). The tarball
-            // itself is already checksum-verified, so this must not fail the
-            // install.
-            logger.warning("Runtime bundle metadata fetch failed: \(error.localizedDescription)")
+            logger.error("Runtime bundle metadata required for verified signing coverage failed: \(error.localizedDescription)")
+            return false
         }
     }
 

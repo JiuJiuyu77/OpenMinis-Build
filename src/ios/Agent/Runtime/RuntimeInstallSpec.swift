@@ -118,16 +118,34 @@ struct RuntimeInstallSpec: Codable, Hashable {
         return (object["sign_paths"] as? [String]) ?? []
     }
 
-    /// 该签名的目标：清单优先，其次 bundle 自带清单。
+    /// Merge central and archive/sidecar signing declarations. A non-empty
+    /// central list is not a complete inventory: Theos publishes its actual
+    /// executable/library set in the checksum-bound runtime-bundle.json.
     func signTargets(in root: URL) -> (entitlements: [String], adhoc: [String]) {
-        if !signPaths.isEmpty || !signPathsWithoutEntitlements.isEmpty {
-            return (signPaths, signPathsWithoutEntitlements)
+        var explicitlyEntitled = signPaths
+        var explicitlyUnentitled = signPathsWithoutEntitlements
+        var libraries: [String] = []
+        var executables: [String] = []
+        for filename in ["manifest.json", "runtime-bundle.json"] {
+            guard let url = RuntimePathPolicy.containedURL(filename, in: root),
+                  let data = try? Data(contentsOf: url), data.count <= 4 * 1024 * 1024,
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+            explicitlyEntitled += object["sign_paths"] as? [String] ?? []
+            explicitlyUnentitled += object["sign_paths_without_entitlements"] as? [String] ?? []
+            libraries += object["libraries"] as? [String] ?? []
+            executables += object["executables"] as? [String] ?? []
         }
-        let manifest = RuntimePathPolicy.containedURL("manifest.json", in: root)
-        let object = manifest.flatMap { try? Data(contentsOf: $0) }
-            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
-        return (Self.bundleSignPaths(in: root),
-                object?["sign_paths_without_entitlements"] as? [String] ?? [])
+        func unique(_ values: [String]) -> [String] {
+            var seen = Set<String>()
+            return values.filter { !$0.isEmpty && seen.insert($0).inserted }
+        }
+        let explicitNoSet = Set(explicitlyUnentitled)
+        let explicitEntSet = Set(explicitlyEntitled).subtracting(explicitNoSet)
+        let inventory = libraries + explicitlyUnentitled + executables.filter { !explicitEntSet.contains($0) }
+        let noHost = unique(inventory)
+        let noHostSet = Set(noHost)
+        let entitled = unique(explicitlyEntitled.filter { !noHostSet.contains($0) })
+        return (entitled, noHost)
     }
 
     /// `required_paths` 里当前缺失的项（顺序与清单一致）。

@@ -91,10 +91,19 @@ struct NativeToolchain {
         return found
     }
 
-    /// 文件布局可用：Theos + shell + make 均存在；不代表它们能成功启动。
-    /// 实际执行能力由 NativeRuntimeHealthMonitor 的 shell + make 探针确认。
+    /// 文件布局可用：Theos + shell + make，或至少一个已安装通用运行时
+    /// 可通过 minis-runtime 原生桥执行。真正可执行性由健康探针确认。
     var isAvailable: Bool {
-        theosRoot != nil && shellPath != nil && findTool("make") != nil
+        let hasTheos = theosRoot != nil && shellPath != nil && findTool("make") != nil
+        let runtime = Self.installedEnvironment()
+        let hasRunnableRuntime = runtime.pathEntries.contains { directory in
+            guard let entries = try? FileManager.default.contentsOfDirectory(atPath: directory) else { return false }
+            return entries.contains { name in
+                FileManager.default.isExecutableFile(atPath: (directory as NSString).appendingPathComponent(name))
+                    && !RuntimeDescriptor.isAgentIdentifier(name)
+            }
+        }
+        return hasTheos || hasRunnableRuntime
     }
 
     /// 用户点了「重新检测」：清掉探测缓存。
