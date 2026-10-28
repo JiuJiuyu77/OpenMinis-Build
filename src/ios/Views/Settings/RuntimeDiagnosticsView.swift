@@ -16,6 +16,31 @@
 
 import SwiftUI
 
+// MARK: - 记录里的结论文案
+
+/// 安装记录里的自检/签名结论 → 人能读的一句话。
+/// 之前直接把枚举的 rawValue 拼出来，界面上就是「build_tools: unknown / unknown」。
+private enum SelfCheckLabel {
+    static func text(_ report: RuntimeVerificationReport?) -> String {
+        guard let report else { return AppLocalized("never self-checked") }
+        switch report.status {
+        case .passed: return AppLocalized("self-check passed")
+        case .skipped: return AppLocalized("self-check skipped")
+        case .failed: return AppLocalized("self-check failed")
+        }
+    }
+
+    static func text(_ report: RuntimeSignReport?) -> String {
+        guard let report else { return AppLocalized("never signed") }
+        switch report.status {
+        case .signed: return AppLocalized("signed")
+        case .adhocOnly: return AppLocalized("ad-hoc only")
+        case .skipped: return AppLocalized("signing skipped")
+        case .failed: return AppLocalized("signing failed")
+        }
+    }
+}
+
 // MARK: - 检查项
 
 struct RuntimeDiagItem: Identifiable {
@@ -254,6 +279,9 @@ final class RuntimeDiagnosticsModel: ObservableObject {
                 } else {
                     set("native-spawn", .failed(AppLocalized("Child processes are not root")), detail: summary)
                 }
+            } else if identity.contains("Every candidate shell failed") {
+                set("native-spawn", .failed(AppLocalized("No shell could be started on this device")),
+                    detail: identity)
             } else {
                 set("native-spawn", .failed(AppLocalized("Could not read the child process identity")),
                     detail: firstLine(identity))
@@ -277,7 +305,9 @@ final class RuntimeDiagnosticsModel: ObservableObject {
                                writeLines.count, readOnly.count))
         } else if wronglyWritable.isEmpty {
             set("native-fs", .failed(AppLocalized("Expected writable directories are not writable")),
-                detail: firstLine(fsReport))
+                detail: fsReport.contains("Every candidate shell failed")
+                    ? AppLocalized("No shell could be started on this device — the filesystem probe never ran.")
+                    : firstLine(fsReport))
         } else {
             set("native-fs", .failed(AppLocalized("SSV read-only volumes became writable (unexpected)")),
                 detail: wronglyWritable.joined(separator: ", "))
@@ -328,11 +358,11 @@ final class RuntimeDiagnosticsModel: ObservableObject {
             var bad = 0
             var unchecked = 0
             for (id, record) in manager.records.sorted(by: { $0.key < $1.key }) {
-                let selfCheck = record.verification?.status.rawValue ?? "unknown"
-                let signing = record.signing?.status.rawValue ?? "unknown"
+                let selfCheck = SelfCheckLabel.text(record.verification)
+                let signing = SelfCheckLabel.text(record.signing)
                 if record.verification?.status == .failed || record.signing?.status == .failed { bad += 1 }
                 if record.verification == nil || record.signing == nil { unchecked += 1 }
-                lines.append("\(id): \(selfCheck) / \(signing)")
+                lines.append("\(id): \(selfCheck) · \(signing)")
             }
             let detail = lines.joined(separator: " · ")
             if bad > 0 {
@@ -403,12 +433,17 @@ struct RuntimeDiagnosticsView: View {
 
     @StateObject private var model = RuntimeDiagnosticsModel()
     @ObservedObject private var manager = DeveloperRuntimeManager.shared
-    @ObservedObject private var preference = ToolExecutorPreference.shared
     @ObservedObject private var healthMonitor = NativeRuntimeHealthMonitor.shared
 
     @State private var manualRoot = NativeToolchain.manualRootPath ?? ""
     @State private var repairing = false
     @State private var repairReport: RuntimeRepairReport?
+    /// 正在单项修复的行（只允许同时跑一个，避免两次重签互相覆盖）。
+    @State private var repairingItem: String?
+    /// 每行的单项修复结论。
+    @State private var itemReports: [String: RuntimeRepairReport] = [:]
+    /// 展开了长说明的行。
+    @State private var expandedItems: Set<String> = []
     @State private var showDetails = false
     @State private var manifestURLText = RuntimeManifestLoader.overrideURLString
 
@@ -494,31 +529,118 @@ struct RuntimeDiagnosticsView: View {
     }
 
     private func diagRow(_ item: RuntimeDiagItem) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(LinearGradient(colors: item.tint,
-                                     startPoint: .topLeading, endPoint: .bottomTrailing))
-                .frame(width: 36, height: 36)
-                .overlay {
-                    Image(systemName: item.icon)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
+        let expanded = expandedItems.contains(item.id)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 12) {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(LinearGradient(colors: item.tint,
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 36, height: 36)
+                    .overlay {
+                        Image(systemName: item.icon)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                    }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(verbatim: item.title)
+                        .font(.body.weight(.semibold))
+                    Text(verbatim: subtitle(for: item, expanded: expanded))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(expanded ? nil : 2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(verbatim: item.title)
-                    .font(.body.weight(.semibold))
-                Text(verbatim: subtitle(for: item))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                Spacer(minLength: 6)
+                trailing(for: item)
             }
-            Spacer(minLength: 6)
-            trailing(for: item)
+
+            // 有长说明的行：失败时默认折两行，点一下看全（原来截断后只剩半句话）。
+            if hasDetail(item) {
+                Button {
+                    if expanded { expandedItems.remove(item.id) } else { expandedItems.insert(item.id) }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(verbatim: expanded ? AppLocalized("Hide details") : AppLocalized("Show details"))
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                    }
+                    .font(.caption2)
+                }
+                .buttonStyle(.borderless)
+            }
+
+            if isFailed(item) {
+                repairRow(item)
+            }
+            if let report = itemReports[item.id] {
+                itemReportView(report)
+            }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
     }
 
-    private func subtitle(for item: RuntimeDiagItem) -> String {
+    private func isFailed(_ item: RuntimeDiagItem) -> Bool {
+        if case .failed = item.status { return true }
+        return false
+    }
+
+    private func hasDetail(_ item: RuntimeDiagItem) -> Bool {
+        !item.detail.isEmpty
+    }
+
+    /// 单项修复：只动这一行对应的东西，修完立刻复检。
+    @ViewBuilder
+    private func repairRow(_ item: RuntimeDiagItem) -> some View {
+        HStack(spacing: 10) {
+            Button {
+                guard repairingItem == nil else { return }
+                repairingItem = item.id
+                itemReports[item.id] = nil
+                Task {
+                    let report = await RuntimeRepair.repair(item: item.id)
+                    itemReports[item.id] = report
+                    repairingItem = nil
+                    expandedItems.insert(item.id)
+                    await model.run(force: true)
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    if repairingItem == item.id {
+                        ProgressView().controlSize(.mini)
+                    } else {
+                        Image(systemName: "wrench.and.screwdriver.fill")
+                    }
+                    Text(verbatim: repairingItem == item.id ? AppLocalized("Repairing…") : AppLocalized("Repair this item"))
+                }
+                .font(.caption.weight(.medium))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(repairingItem != nil)
+            Spacer(minLength: 0)
+        }
+        .padding(.leading, 48)
+    }
+
+    @ViewBuilder
+    private func itemReportView(_ report: RuntimeRepairReport) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 5) {
+                Image(systemName: report.resolved ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(report.resolved ? Color.green : Color.orange)
+                Text(verbatim: report.title)
+                    .font(.caption.weight(.semibold))
+            }
+            ForEach(Array(report.steps.enumerated()), id: \.offset) { entry in
+                Text(verbatim: entry.element)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.leading, 48)
+    }
+
+    private func subtitle(for item: RuntimeDiagItem, expanded: Bool) -> String {
         switch item.status {
         case .pending:
             return item.subtitle
@@ -527,9 +649,13 @@ struct RuntimeDiagnosticsView: View {
         case .ok:
             return item.detail.isEmpty ? AppLocalized("Passed") : item.detail
         case .failed(let reason):
-            return item.detail.isEmpty ? reason : reason + " · " + item.detail
+            // 折叠时只给结论，展开才铺完整输出：之前把整段 shell 报错塞进副标题，
+            // 两行截断后只剩「Could not start a process. Every candidate shell…」。
+            guard expanded, !item.detail.isEmpty else { return reason }
+            return reason + "\n" + item.detail
         case .skipped(let reason):
-            return item.detail.isEmpty ? reason : reason + " · " + item.detail
+            guard expanded, !item.detail.isEmpty else { return reason }
+            return reason + "\n" + item.detail
         }
     }
 
@@ -644,11 +770,10 @@ struct RuntimeDiagnosticsView: View {
         }
     }
 
-    // MARK: 运行时清单 / 执行器
+    // MARK: 运行时清单
 
     private var settingsSection: some View {
         Section {
-            LabeledContent(AppLocalized("Effective executor"), value: preference.resolvedExecutor.displayName)
             if let health = healthMonitor.health {
                 LabeledContent(AppLocalized("Runtime probe"), value: health.summary)
                     .font(.caption)

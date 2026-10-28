@@ -142,6 +142,21 @@ jobs:
           bash -n scripts/stage_app_helpers.sh
           echo "stage_app_helpers.sh parses"
 
+      - name: Helper staging phase is wired into the app target
+        run: |
+          set -euo pipefail
+          # 脚本只有真被 Xcode 调用才有意义：没有这个 Run Script 阶段，
+          # 包里就没有 Helpers/bash.real 与 codex-sign，签名层只能退化成 adhoc。
+          project=src/ios/Minis.xcodeproj/project.pbxproj
+          grep -q 'Stage App Helpers' "$project" \
+            || { echo "Stage App Helpers build phase missing from the app target" >&2; exit 1; }
+          grep -q 'scripts/stage_app_helpers.sh' "$project" \
+            || { echo "the build phase does not call stage_app_helpers.sh" >&2; exit 1; }
+          # 阶段必须挂在应用 target 的 buildPhases 里，而不只是定义在工程里。
+          awk '/isa = PBXNativeTarget;/{tgt=1} tgt && /buildPhases = \(/{ph=1} ph && /Stage App Helpers/{found=1} ph && /\);/{if(found){print "ok: staged in target"; exit 0}; ph=0}' "$project" \
+            | grep -q 'ok: staged' || { echo "build phase is not attached to a target" >&2; exit 1; }
+          echo "ok: helper staging is wired"
+
       - name: Helper staging is a no-op without binaries
         run: |
           set -euo pipefail

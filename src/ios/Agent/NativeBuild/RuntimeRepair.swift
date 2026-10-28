@@ -196,6 +196,166 @@ enum RuntimeRepair {
                                    resolved: resolved)
     }
 
+    // MARK: - 单项修复
+
+    /// 诊断页每一行失败都能单独修，不必再猜「一键修复」到底动了什么。
+    ///
+    /// 每个 id 对应 `RuntimeDiagnosticsView` 里的一行；返回的 steps 直接铺在
+    /// 该行下面，用户能看到这一次到底做了什么。
+    @MainActor
+    static func repair(item id: String) async -> RuntimeRepairReport {
+        var steps: [String] = []
+        // 任何单项修复都先让探针重新说一次话，避免拿缓存里的旧结论下判断。
+        NativeToolchain.shared.resetCache()
+        NativeRuntimeHealthMonitor.shared.invalidate()
+        MinisHostEnvironmentDetector.invalidateCache()
+
+        switch id {
+        case "native-spawn", "native-fs", "native-tcc", "shell":
+            let host = MinisHostEnvironmentDetector.detect()
+            steps.append(AppLocalized("Environment: ") + host.summary)
+            var health = await NativeRuntimeHealthMonitor.shared.refresh(force: true)
+            steps.append(AppLocalized("Probe: ") + health.summary)
+            if !health.ok, health.failure.workaroundIsSandbox, let root = health.theosRoot {
+                // libiosexec / 容器外 mmap 被拒：把运行时搬进 App 容器再试。
+                let imported = await importRuntimeIntoContainer(from: root)
+                steps.append(imported.message)
+                if imported.ok {
+                    health = await NativeRuntimeHealthMonitor.shared.refresh(force: true)
+                    steps.append(AppLocalized("Probe after import: ") + health.summary)
+                }
+            }
+            if health.ok {
+                return RuntimeRepairReport(title: AppLocalized("Native execution works now"),
+                                           steps: steps, resolved: true)
+            }
+            steps.append(AppLocalized("Still failing: ") + quickFixHint(for: health.failure))
+            if !health.detail.isEmpty { steps.append(health.detail) }
+            return RuntimeRepairReport(title: AppLocalized("Could not start a child process"),
+                                       steps: steps, resolved: false)
+
+        case "native-sign":
+            return await resignInstalledRuntimes(steps: &steps)
+
+        case "native-runtimes":
+            return await reverifyInstalledRuntimes(steps: &steps)
+
+        case "native-build", "integrity":
+            // libiosexec 加载不了 / mmap 被拒：先把运行时搬进 App 容器再试；
+            // 真缺文件（截断、make 不在）才重装。
+            var health = await NativeRuntimeHealthMonitor.shared.refresh(force: true)
+            steps.append(AppLocalized("Probe: ") + health.summary)
+            if !health.ok, health.failure.workaroundIsSandbox, let root = health.theosRoot {
+                let imported = await importRuntimeIntoContainer(from: root)
+                steps.append(imported.message)
+                if imported.ok {
+                    health = await NativeRuntimeHealthMonitor.shared.refresh(force: true)
+                    steps.append(AppLocalized("Probe after import: ") + health.summary)
+                }
+            }
+            if health.ok {
+                return RuntimeRepairReport(title: AppLocalized("The toolchain runs now"),
+                                           steps: steps, resolved: true)
+            }
+            return await reinstallTheosIfDamaged(steps: &steps)
+
+        default:
+            // 基础项（沙箱内核、通道、配置、文件）没有单独的动作，交给一键修复。
+            return await oneClick()
+        }
+    }
+
+    /// 签名层：把已装运行时的可执行文件按本 App 的 entitlements 重新签一遍。
+    @MainActor
+    private static func resignInstalledRuntimes(steps: inout [String]) async -> RuntimeRepairReport {
+        let manager = DeveloperRuntimeManager.shared
+        let installed = manager.runtimes.filter { manager.records[$0.id] != nil }
+        guard !installed.isEmpty else {
+            steps.append(AppLocalized("No runtime is installed, so there is nothing to re-sign."))
+            return RuntimeRepairReport(title: AppLocalized("Nothing to sign"), steps: steps, resolved: false)
+        }
+        var signedTotal = 0
+        var failedTotal = 0
+        for descriptor in installed {
+            let root = DeveloperRuntimePaths.runtimeRoot(id: descriptor.id)
+            let report = RuntimeSigner.signRuntime(descriptor: descriptor,
+                                                    root: root,
+                                                    canExecuteNative: true)
+            manager.updateSigning(report, for: descriptor.id)
+            signedTotal += report.signedCount
+            failedTotal += report.failedPaths.count
+            steps.append("\(descriptor.id): \(report.status.rawValue) · \(AppLocalized("signed")) \(report.signedCount)"
+                         + (report.failedPaths.isEmpty ? "" : " · \(AppLocalized("failed")) \(report.failedPaths.count)"))
+            if let reason = report.reason { steps.append("  " + reason) }
+            if report.status == .failed {
+                for path in report.failedPaths.prefix(3) { steps.append("  ✗ " + path) }
+            }
+        }
+        if failedTotal == 0 {
+            steps.append(AppLocalized("Signed ") + "\(signedTotal)")
+            return RuntimeRepairReport(title: AppLocalized("Runtime binaries re-signed"),
+                                       steps: steps, resolved: true)
+        }
+        steps.append(AppLocalized("Some binaries could not be signed. If ldid is missing, reinstall the Theos runtime (it ships its own ldid)."))
+        return RuntimeRepairReport(title: AppLocalized("Signing partially failed"), steps: steps, resolved: false)
+    }
+
+    /// 自检：对已装运行时重跑清单里的探针，结论写回安装记录。
+    @MainActor
+    private static func reverifyInstalledRuntimes(steps: inout [String]) async -> RuntimeRepairReport {
+        let manager = DeveloperRuntimeManager.shared
+        let installed = manager.runtimes.filter { manager.records[$0.id] != nil }
+        guard !installed.isEmpty else {
+            steps.append(AppLocalized("No runtime is installed yet."))
+            return RuntimeRepairReport(title: AppLocalized("Nothing to verify"), steps: steps, resolved: false)
+        }
+        var allPassed = true
+        for descriptor in installed {
+            let root = DeveloperRuntimePaths.runtimeRoot(id: descriptor.id)
+            let report = await RuntimeInstallVerifier.verify(descriptor: descriptor,
+                                                             root: root,
+                                                             canExecuteNative: true)
+            manager.updateVerification(report, for: descriptor.id)
+            steps.append("\(descriptor.id): \(report.status.rawValue)"
+                         + (report.missingPaths.isEmpty ? "" : " · \(AppLocalized("missing")) \(report.missingPaths.count)")
+                         + (report.reason.map { " · " + $0 } ?? ""))
+            if report.status != .passed { allPassed = false }
+        }
+        return RuntimeRepairReport(title: allPassed ? AppLocalized("Every runtime passed its self-check")
+                                                    : AppLocalized("Some runtimes failed their self-check"),
+                                   steps: steps, resolved: allPassed)
+    }
+
+    /// Theos 运行时缺文件时重装；不缺就只解释当前结论。
+    @MainActor
+    private static func reinstallTheosIfDamaged(steps: inout [String]) async -> RuntimeRepairReport {
+        var health = await NativeRuntimeHealthMonitor.shared.refresh(force: true)
+        steps.append(AppLocalized("Probe: ") + health.summary)
+        guard health.failure == .runtimeDamaged else {
+            if health.ok {
+                steps.append(AppLocalized("Native execution already works — nothing to reinstall."))
+                return RuntimeRepairReport(title: AppLocalized("Nothing to repair"), steps: steps, resolved: true)
+            }
+            steps.append(AppLocalized("The runtime files are intact; the failure is elsewhere: ")
+                         + quickFixHint(for: health.failure))
+            return RuntimeRepairReport(title: AppLocalized("Runtime is not the problem"),
+                                       steps: steps, resolved: false)
+        }
+        let runtimeID = installedRuntimeID(from: health.theosRoot)
+        guard let runtimeID, let descriptor = DeveloperRuntimeManager.shared.runtimes.first(where: { $0.id == runtimeID }) else {
+            steps.append(AppLocalized("The damaged runtime was not installed by Developer Runtime, so it cannot be reinstalled automatically. Install Theos from Settings → Developer Runtime."))
+            return RuntimeRepairReport(title: AppLocalized("Cannot reinstall automatically"),
+                                       steps: steps, resolved: false)
+        }
+        steps.append(AppLocalized("Reinstalling ") + runtimeID + "…")
+        await DeveloperRuntimeManager.shared.installAndWait(descriptor)
+        health = await NativeRuntimeHealthMonitor.shared.refresh(force: true)
+        steps.append(AppLocalized("Probe after reinstall: ") + health.summary)
+        return RuntimeRepairReport(title: health.ok ? AppLocalized("Runtime reinstalled")
+                                                    : AppLocalized("Reinstall did not fix it"),
+                                   steps: steps, resolved: health.ok)
+    }
+
     /// 从 `DeveloperRuntime/installed/<id>/...` 里解出运行时 id。
     nonisolated static func installedRuntimeID(from path: String?) -> String? {
         guard let path else { return nil }

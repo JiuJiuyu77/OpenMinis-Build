@@ -205,8 +205,9 @@ enum NativeCommandRunner {
             \(detail)
             Shells tried:
               \(tried)
-            Diagnostics: Settings → Executor → Toolchain diagnostics (the Shell row shows which shell was picked), \
-            or Settings → Developer Runtime → runtimes (reinstall Theos if the runtime is incomplete).
+            Where to look: Settings → 运行诊断 (Run diagnostics) — the "Command execution" and \
+            "Child process identity" rows list every candidate shell with its own reason, and each \
+            failing row has a "Repair this item" button. Settings → Developer Runtime reinstalls Theos.
             """,
                           exitCode: -1, duration: Date().timeIntervalSince(started), timedOut: false)
         }

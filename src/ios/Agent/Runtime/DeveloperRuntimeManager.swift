@@ -239,6 +239,22 @@ final class DeveloperRuntimeManager: ObservableObject {
         records[id]?.verification
     }
 
+    /// 单项修复用：把重跑自检的结论写回安装记录（不重装、不动文件）。
+    func updateVerification(_ report: RuntimeVerificationReport, for id: String) {
+        guard var record = records[id] else { return }
+        record.verification = report
+        records[id] = record
+        saveRecords()
+    }
+
+    /// 单项修复用：把重新签名的结论写回安装记录。
+    func updateSigning(_ report: RuntimeSignReport, for id: String) {
+        guard var record = records[id] else { return }
+        record.signing = report
+        records[id] = record
+        saveRecords()
+    }
+
     /// 安装记录里的签名结论。
     func signingReport(for id: String) -> RuntimeSignReport? {
         records[id]?.signing

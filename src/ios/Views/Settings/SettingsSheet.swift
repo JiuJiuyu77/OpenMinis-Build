@@ -33,8 +33,6 @@ private enum SettingsDestination: Hashable {
     case about
     case permissions
     case environments
-    // [T-tool-executor-preference]
-    case executor
     // [T-mcp-oauth-deeplink]
     case mcpIntegrations
     case mcpServerDetail(serverId: String)
@@ -229,19 +227,6 @@ struct SettingsSheet: View {
                                 .background(.green, in: Circle())
                         }
                     }
-                    NavigationLink {
-                        ToolExecutorSettingsView()
-                    } label: {
-                        Label {
-                            Text("Executor")
-                        } icon: {
-                            Image(systemName: "gearshape.2.fill")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.white)
-                                .frame(width: 21, height: 21)
-                                .background(.indigo, in: Circle())
-                        }
-                    }
                     // [T-developer-runtime] Installer for the toolchain runtimes
                     // (Theos, OLLVM, …). Independent of the agent surface above:
                     // it only downloads and tracks developer toolchains.
@@ -286,21 +271,6 @@ struct SettingsSheet: View {
                                 .foregroundStyle(.white)
                                 .frame(width: 21, height: 21)
                                 .background(.teal, in: Circle())
-                        }
-                    }
-                    // Plugin Management（精选目录 + 本机已装）单独一页，
-                    // 避免和「Agent 工具」里的开关混在一起。
-                    NavigationLink {
-                        PluginManagementView()
-                    } label: {
-                        Label {
-                            Text("Plugin Management")
-                        } icon: {
-                            Image(systemName: "puzzlepiece.extension.fill")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.white)
-                                .frame(width: 21, height: 21)
-                                .background(.purple, in: Circle())
                         }
                     }
                 }
@@ -535,8 +505,6 @@ struct SettingsSheet: View {
                     EnvironmentVariablesView()
                 case .permissions:
                     OffloadPermissionSettingsView()
-                case .executor:
-                    ToolExecutorSettingsView()
                 // [T-mcp-oauth-deeplink] Detail = the list view told to open
                 // the server's edit sheet on appear; a deleted/unknown server
                 // just lands on the list (no crash, sensible fallback).

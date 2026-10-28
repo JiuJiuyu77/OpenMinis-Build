@@ -376,7 +376,6 @@ struct MinisApp: App {
                     // Discover plugins that declare `capabilities` in their
                     // manifest and mirror those declarations into the registry.
                     PluginManifestStore.shared.attach(bridge: PluginCapabilityBridge.shared)
-                    PluginManifestStore.shared.installBundledExamplesIfNeeded()
                     PluginManifestStore.shared.reload()
                     // Register notification delegate for shortcut task tap-to-open
                     ShortcutNotificationDelegate.shared.register()
