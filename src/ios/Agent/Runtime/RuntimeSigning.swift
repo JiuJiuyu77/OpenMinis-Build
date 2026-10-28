@@ -126,22 +126,26 @@ enum RuntimeSigner {
             return .failed(AppLocalized("This app is not signed with native entitlements, so runtime binaries cannot be made executable."),
                            ldid: ldid?.path)
         }
-        // Bootstrap the staged signer itself before asking it to sign others.
+        let plistURL = entitlements.isEmpty ? nil : writeTemporaryPlist(entitlements)
+        guard entitlements.isEmpty || plistURL != nil else {
+            return .failed("Cannot write signing entitlements", ldid: ldid?.path)
+        }
+        defer { if let plistURL { try? FileManager.default.removeItem(at: plistURL) } }
+        // A cold-install ldid must gain execution trust BEFORE we run it.
+        // Ad-hoc alone is not a TrollStore bootstrap. The standalone signer
+        // defaults to the CoreTrust mode, with our own (not MT's) entitlements.
         if let ldid, let codexSign,
            ldid.path.hasPrefix(root.standardizedFileURL.path + "/") {
+            var bootstrapArguments = plistURL.map { ["--entitlements", $0.path] } ?? []
+            bootstrapArguments.append(ldid.path)
             let bootstrap = RuntimeProbeRunner.run(executable: codexSign.path,
-                arguments: ["--adhoc-only", ldid.path], environment: signingEnvironment,
+                arguments: bootstrapArguments, environment: signingEnvironment,
                 workingDirectory: root.path, timeout: timeout)
             guard bootstrap.spawnError == nil, !bootstrap.timedOut, bootstrap.status == 0 else {
                 return .failed(bootstrap.spawnError ?? bootstrap.output, paths: [ldid.path],
                                ldid: ldid.path, codex: codexSign.path)
             }
         }
-        let plistURL = entitlements.isEmpty ? nil : writeTemporaryPlist(entitlements)
-        guard entitlements.isEmpty || plistURL != nil else {
-            return .failed("Cannot write signing entitlements", ldid: ldid?.path)
-        }
-        defer { if let plistURL { try? FileManager.default.removeItem(at: plistURL) } }
         var signed = 0
         var failed: [String] = []
         var lastOutput = ""
@@ -194,9 +198,10 @@ enum RuntimeSigner {
                 continue
             }
             var codexArguments: [String] = []
-            if isAdhocOnly {
-                codexArguments.append("--adhoc-only")
-            } else if let plistURL {
+            // No host entitlements does NOT mean no CoreTrust signature.
+            // MT also treats these as separate axes; do not leave frameworks
+            // ad-hoc-only merely because they must not receive executable privileges.
+            if !isAdhocOnly, let plistURL {
                 codexArguments.append(contentsOf: ["--entitlements", plistURL.path])
             }
             codexArguments.append(target.path)

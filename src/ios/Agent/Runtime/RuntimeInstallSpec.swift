@@ -150,10 +150,13 @@ enum RuntimePathPolicy {
 
     static func containedURL(_ path: String, in root: URL) -> URL? {
         guard isRelativePath(path) else { return nil }
-        guard let base = canonicalURL(root) else { return nil }
+        guard let canonical = canonicalURL(root) else { return nil }
+        let base = URL(fileURLWithPath: "/" + canonical.path.split(separator: "/").joined(separator: "/"))
         let candidate = root.appendingPathComponent(path).standardizedFileURL
-        guard let resolved = canonicalURL(candidate)?.path,
-              resolved == base.path || resolved.hasPrefix(base.path + "/") else { return nil }
+        guard let target = canonicalURL(candidate) else { return nil }
+        let resolved = "/" + target.path.split(separator: "/").joined(separator: "/")
+        let basePath = "/" + base.path.split(separator: "/").joined(separator: "/")
+        guard resolved == basePath || resolved.hasPrefix(basePath == "/" ? "/" : basePath + "/") else { return nil }
         return candidate
     }
 

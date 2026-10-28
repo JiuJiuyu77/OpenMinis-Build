@@ -39,7 +39,14 @@ enum NativeSpawnIdentity {
         try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("escape"), withDestinationURL: outside)
         require(RuntimePathPolicy.containedURL("escape/file", in: root) == nil, "symlink escape accepted")
         let good = root.appendingPathComponent("good")
-        try RuntimeTarGzExtractor.extract(fixtures.appendingPathComponent("good.tar.gz"), to: good)
+        do {
+            try RuntimeTarGzExtractor.extract(fixtures.appendingPathComponent("good.tar.gz"), to: good)
+        } catch {
+            let candidate = good.appendingPathComponent("bin/tool")
+            let diagnostic = "EXTRACT FAILURE \(error) root=\(good.path) base=\(RuntimePathPolicy.canonicalURL(good)?.path ?? "nil") candidate=\(candidate.path) resolved=\(RuntimePathPolicy.canonicalURL(candidate)?.path ?? "nil")\n"
+            FileHandle.standardError.write(Data(diagnostic.utf8))
+            throw error
+        }
         let tool = good.appendingPathComponent("bin/tool")
         require(FileManager.default.isExecutableFile(atPath: tool.path), "tar lost executable bit")
         require(try String(contentsOf: good.appendingPathComponent("file"), encoding: .utf8) == "fixture", "tar payload mismatch")

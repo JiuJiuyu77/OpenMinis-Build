@@ -52,7 +52,7 @@ class RuntimeInstallSourceContract(unittest.TestCase):
         self.assertIn("canonicalURL(candidate)", policy)
         self.assertIn("destinationOfSymbolicLink", policy)
         self.assertIn("links <= 40", policy)
-        self.assertIn('resolved.hasPrefix(base.path + "/")', policy)
+        self.assertIn('resolved.hasPrefix(basePath == "/" ? "/" : basePath + "/")', policy)
         self.assertIn("RuntimePathPolicy.containedURL(probe.executable", source("RuntimeInstallVerifier"))
         self.assertIn("RuntimePathPolicy.containedURL($0, in: root)", source("RuntimeSigning"))
 
@@ -87,7 +87,10 @@ class RuntimeInstallSourceContract(unittest.TestCase):
         text = source("RuntimeSigning").split("static func signArtifacts", 1)[0]
         self.assertIn("locateLdid(stagingRoot: root)", text)
         self.assertIn("signingEnvironment.merge(overlay.exports)", text)
-        self.assertIn('["--adhoc-only", ldid.path]', text)
+        self.assertIn('bootstrapArguments.append(ldid.path)', text)
+        self.assertNotIn('["--adhoc-only", ldid.path]', text)
+        final_sign = text.split('var codexArguments: [String] = []', 1)[1].split('codexArguments.append(target.path)', 1)[0]
+        self.assertNotIn('--adhoc-only', final_sign)
         self.assertGreaterEqual(text.count("environment: signingEnvironment"), 4)
         self.assertIn("Declared signing target is missing", text)
         self.assertIn("Cannot write signing entitlements", text)
