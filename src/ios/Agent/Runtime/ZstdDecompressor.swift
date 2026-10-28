@@ -11,20 +11,6 @@
 
 import Foundation
 
-/// 与 zstd C 头文件里的布局逐字段对应。手写而不是 `#import`，是为了不把
-/// zstd 头文件塞进 bridging header（那会让整个 App 依赖它才能编译）。
-struct ZstdInBuffer {
-    var src: UnsafeRawPointer?
-    var size: Int
-    var pos: Int
-}
-
-struct ZstdOutBuffer {
-    var dst: UnsafeMutableRawPointer?
-    var size: Int
-    var pos: Int
-}
-
 enum ZstdDecompressor {
 
     enum ZstdError: LocalizedError {
@@ -88,11 +74,14 @@ enum ZstdDecompressor {
         return paths
     }
 
-    private static var cachedAPI: API??
+    private static var cachedAPI: API?
+    private static let apiLock = NSLock()
 
     private static func loadAPI() -> API? {
+        apiLock.lock(); defer { apiLock.unlock() }
         if let cachedAPI { return cachedAPI }
         let resolved = resolve()
+        // Only cache success: installing Theos may provide libzstd later.
         cachedAPI = resolved
         return resolved
     }
@@ -128,7 +117,8 @@ enum ZstdDecompressor {
     /// Streaming decompress `source` into `destination` (a plain tar file).
     /// Chunked, so a 100 MB package never lands in memory at once.
     @discardableResult
-    static func decompress(_ source: URL, to destination: URL) throws -> Int64 {
+    static func decompress(_ source: URL, to destination: URL,
+                           isCancelled: () -> Bool = { false }) throws -> Int64 {
         guard let api = loadAPI() else { throw ZstdError.libraryUnavailable }
         guard let input = try? FileHandle(forReadingFrom: source) else { throw ZstdError.emptyInput }
         defer { try? input.close() }

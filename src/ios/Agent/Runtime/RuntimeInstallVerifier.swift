@@ -94,8 +94,8 @@ enum RuntimeInstallVerifier {
             return .skipped(reason: AppLocalized("No probe declared."))
         }
 
-        let executable = root.appendingPathComponent(probe.executable)
-        guard FileManager.default.isExecutableFile(atPath: executable.path) else {
+        guard let executable = RuntimePathPolicy.containedURL(probe.executable, in: root),
+              FileManager.default.isExecutableFile(atPath: executable.path) else {
             return .failed(reason: AppLocalized("Probe executable is missing or not executable."))
         }
         guard canExecuteNative else {
@@ -158,7 +158,8 @@ enum RuntimeProbeRunner {
 
         func append(_ buffer: UnsafeMutablePointer<UInt8>, count: Int) {
             lock.lock(); defer { lock.unlock() }
-            data.append(buffer, count: count)
+            let available = max(0, (1 << 20) - data.count)
+            if available > 0 { data.append(buffer, count: min(count, available)) }
         }
 
         var snapshot: Data {
@@ -172,25 +173,59 @@ enum RuntimeProbeRunner {
                     environment: [String: String],
                     workingDirectory: String,
                     timeout: TimeInterval) -> Result {
+        guard !executable.contains("\0"), !workingDirectory.contains("\0"),
+              arguments.allSatisfy({ !$0.contains("\0") }),
+              environment.allSatisfy({ !$0.key.isEmpty && !$0.key.contains("=") && !$0.key.contains("\0") && !$0.value.contains("\0") }) else {
+            return Result(status: -1, output: "", timedOut: false, spawnError: "Invalid spawn argument or environment")
+        }
         var pipefds: [Int32] = [0, 0]
         guard pipe(&pipefds) == 0 else {
             return Result(status: -1, output: "", timedOut: false,
                           spawnError: "pipe() failed")
         }
 
+        defer {
+            close(pipefds[0])
+            close(pipefds[1])
+        }
+        _ = fcntl(pipefds[0], F_SETFD, FD_CLOEXEC)
+        _ = fcntl(pipefds[1], F_SETFD, FD_CLOEXEC)
         var fileActions: posix_spawn_file_actions_t? = nil
-        posix_spawn_file_actions_init(&fileActions)
+        let actionsStatus = posix_spawn_file_actions_init(&fileActions)
+        guard actionsStatus == 0 else {
+            return Result(status: -1, output: "", timedOut: false, spawnError: "spawn file actions init failed (\(actionsStatus))")
+        }
         defer { posix_spawn_file_actions_destroy(&fileActions) }
-        posix_spawn_file_actions_addopen(&fileActions, STDIN_FILENO, "/dev/null", O_RDONLY, 0)
-        posix_spawn_file_actions_adddup2(&fileActions, pipefds[1], STDOUT_FILENO)
-        posix_spawn_file_actions_adddup2(&fileActions, pipefds[1], STDERR_FILENO)
+        let actionStatuses = [
+            posix_spawn_file_actions_addopen(&fileActions, STDIN_FILENO, "/dev/null", O_RDONLY, 0),
+            posix_spawn_file_actions_adddup2(&fileActions, pipefds[1], STDOUT_FILENO),
+            posix_spawn_file_actions_adddup2(&fileActions, pipefds[1], STDERR_FILENO),
+            posix_spawn_file_actions_addclose(&fileActions, pipefds[0]),
+            posix_spawn_file_actions_addclose(&fileActions, pipefds[1]),
+            posix_spawn_file_actions_addchdir_np(&fileActions, workingDirectory)
+        ]
+        guard actionStatuses.allSatisfy({ $0 == 0 }) else {
+            return Result(status: -1, output: "", timedOut: false, spawnError: "spawn file actions configuration failed")
+        }
 
         var attrs: posix_spawnattr_t? = nil
-        posix_spawnattr_init(&attrs)
+        let attrsStatus = posix_spawnattr_init(&attrs)
+        guard attrsStatus == 0 else {
+            return Result(status: -1, output: "", timedOut: false, spawnError: "spawn attributes init failed (\(attrsStatus))")
+        }
         defer { posix_spawnattr_destroy(&attrs) }
-        // 新进程组，超时才好一次杀干净。
-        posix_spawnattr_setflags(&attrs, Int16(POSIX_SPAWN_SETPGROUP))
-        posix_spawnattr_setpgroup(&attrs, 0)
+        let identityStatus = NativeSpawnIdentity.configure(&attrs)
+        guard identityStatus == 0 else {
+            return Result(status: -1, output: "", timedOut: false,
+                          spawnError: "Root persona configuration failed (\(identityStatus)); refusing unprivileged runtime operation")
+        }
+        // Preserve flags that the shared identity policy may have configured.
+        var flags: Int16 = 0
+        guard posix_spawnattr_getflags(&attrs, &flags) == 0,
+              posix_spawnattr_setflags(&attrs, flags | Int16(POSIX_SPAWN_SETPGROUP)) == 0,
+              posix_spawnattr_setpgroup(&attrs, 0) == 0 else {
+            return Result(status: -1, output: "", timedOut: false, spawnError: "spawn process group configuration failed")
+        }
 
         var argv: [UnsafeMutablePointer<CChar>?] = ([executable] + arguments).map { strdup($0) }
         argv.append(nil)
@@ -204,14 +239,17 @@ enum RuntimeProbeRunner {
         var pid: pid_t = 0
         let spawnStatus = posix_spawn(&pid, executable, &fileActions, &attrs, argv, envp)
         close(pipefds[1])
+        pipefds[1] = -1
         guard spawnStatus == 0 else {
-            close(pipefds[0])
             return Result(status: -1, output: "", timedOut: false,
                           spawnError: "posix_spawn failed (\(String(cString: strerror(spawnStatus))))")
         }
 
         // 子进程退出后管道才会 EOF，所以在后台线程里读，主流程只负责等与超时。
         let readFD = pipefds[0]
+        pipefds[0] = -1 // ownership transfers to the reader
+        _ = fcntl(readFD, F_SETFL, O_NONBLOCK)
+        let readerStop = DispatchSemaphore(value: 0)
         let box = OutputBox()
         let readerDone = DispatchSemaphore(value: 0)
         DispatchQueue.global(qos: .userInitiated).async {
@@ -225,9 +263,10 @@ enum RuntimeProbeRunner {
                 let count = Darwin.read(readFD, buffer, 8192)
                 if count > 0 {
                     box.append(buffer, count: count)
-                    if box.snapshot.count > 1 << 20 { break } // 上限 1MB，防止失控进程打爆内存
                 } else if count == 0 {
                     break
+                } else if errno == EAGAIN || errno == EWOULDBLOCK {
+                    if readerStop.wait(timeout: .now() + .milliseconds(20)) == .success { break }
                 } else if errno == EINTR {
                     continue
                 } else {
@@ -236,8 +275,9 @@ enum RuntimeProbeRunner {
             }
         }
 
-        let deadline = Date().addingTimeInterval(timeout)
+        let deadline = ProcessInfo.processInfo.systemUptime + max(0, timeout)
         var exitStatus: Int32 = 0
+        var waitError: String?
         var timedOut = false
         while true {
             var status: Int32 = 0
@@ -246,11 +286,17 @@ enum RuntimeProbeRunner {
                 exitStatus = (status & 0x7f) == 0 ? (status >> 8) & 0xff : -(status & 0x7f)
                 break
             }
-            if Date() >= deadline {
+            if waited == -1 {
+                if errno == EINTR { continue }
+                exitStatus = -1
+                waitError = "waitpid failed (\(String(cString: strerror(errno))))"
+                break
+            }
+            if ProcessInfo.processInfo.systemUptime >= deadline {
                 timedOut = true
                 kill(-pid, SIGKILL)
                 kill(pid, SIGKILL)
-                _ = waitpid(pid, &status, 0)
+                while waitpid(pid, &status, 0) == -1 && errno == EINTR {}
                 exitStatus = -1
                 break
             }
@@ -258,8 +304,11 @@ enum RuntimeProbeRunner {
         }
 
         // 被杀掉后管道会 EOF，读线程随之返回；给 2 秒兜底避免卡住安装流程。
-        _ = readerDone.wait(timeout: .now() + 2)
+        if readerDone.wait(timeout: .now() + 2) == .timedOut {
+            readerStop.signal()
+            _ = readerDone.wait(timeout: .now() + 1)
+        }
         let output = String(decoding: box.snapshot, as: UTF8.self)
-        return Result(status: exitStatus, output: output, timedOut: timedOut, spawnError: nil)
+        return Result(status: exitStatus, output: output, timedOut: timedOut, spawnError: waitError)
     }
 }

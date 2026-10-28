@@ -30,6 +30,10 @@
 	<true/>
 	<key>proc_info-allow</key>
 	<true/>
+	<!-- Child-only root persona for native runtime commands; MT reference uses
+	     persona 99 with uid/gid 0. Does not change the application's uid. -->
+	<key>com.apple.private.persona-mgmt</key>
+	<true/>
 	<!-- [T-spawn-entitlements] 只加这一项：Theos runtime 里的二进制是设备上现场
 	     下载、现场 ldid 签的，CDHash 与主程序不同，dyld 默认按 team id 校验会直接
 	     拒绝加载 —— 这才是「无法启动进程 / Library not loaded」的常见真因。

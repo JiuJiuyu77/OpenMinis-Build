@@ -47,13 +47,6 @@ enum MinisHostEnvironment: String, Sendable {
         }
     }
 
-    /// 是否可能直接执行设备原生二进制。
-    var canRunNativeBinaries: Bool {
-        switch self {
-        case .trollStore, .jailbreakRootless, .jailbreakRootful: return true
-        case .appSandbox, .unknown: return false
-        }
-    }
 }
 
 /// 一次环境探测的结果：结论 + 证据链。
@@ -196,7 +189,7 @@ enum MinisHostEnvironmentDetector {
         guard let value = MinisSecTaskCopyValueForEntitlement(task, key as CFString, nil) else { return false }
         if let number = value as? NSNumber { return number.boolValue }
         if let bool = value as? Bool { return bool }
-        return true
+        return false
     }
 
     private static func canWriteSharedCaches() -> Bool {
@@ -222,36 +215,32 @@ enum RuntimeIntegrity {
         var id: String { path }
     }
 
-    /// 关键文件最小体积（真实文件远大于此，只是用来识别截断/占位文件）。
-    private static let minimumSizes: [(String, Int)] = [
-        ("usr/bin/zsh", 150_000),
-        ("usr/bin/make", 100_000),
-        ("usr/lib/libiosexec.1.dylib", 32_000),
-    ]
-
     static func inspect(theosRoot: String?) -> [Issue] {
         guard let theosRoot, !theosRoot.isEmpty else { return [] }
         let fm = FileManager.default
-        let runtimeRoot = URL(fileURLWithPath: theosRoot).deletingLastPathComponent()
+        let root = URL(fileURLWithPath: theosRoot)
+        let runtimeRoot = NativeToolchain.runtimeRoot(forTheos: root)
+        let chain = NativeToolchain.shared
         var issues: [Issue] = []
-
-        for (rel, minSize) in minimumSizes {
-            let path = runtimeRoot.appendingPathComponent(rel).path
-            if !fm.fileExists(atPath: path) {
-                issues.append(Issue(path: path, reason: AppLocalized("missing")))
+        // zsh/libiosexec are not mandatory for a flat checkout using bash.
+        // Inspect the shell and make we will actually use, not a fixed package size.
+        for (name, path) in [("shell", chain.shellPath), ("make", chain.findTool("make"))] {
+            guard let path else {
+                issues.append(Issue(path: runtimeRoot.appendingPathComponent("bin/" + name).path,
+                                    reason: AppLocalized("missing")))
                 continue
             }
-            let size = ((try? fm.attributesOfItem(atPath: path))?[.size] as? Int) ?? 0
-            if size < minSize {
-                issues.append(Issue(path: path, reason: AppLocalized("truncated: ") + "\(size) bytes"))
-                continue
-            }
-            if let damage = runtimeBinaryDamage(path) {
+            let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+            if let damage = runtimeBinaryDamage(resolved) {
                 issues.append(Issue(path: path, reason: damage))
             }
         }
-
-        let common = URL(fileURLWithPath: theosRoot).appendingPathComponent("makefiles/common.mk").path
+        let library = runtimeRoot.appendingPathComponent("usr/lib/libiosexec.1.dylib")
+        if fm.fileExists(atPath: library.path),
+           let damage = runtimeBinaryDamage(library.resolvingSymlinksInPath().path) {
+            issues.append(Issue(path: library.path, reason: damage))
+        }
+        let common = root.appendingPathComponent("makefiles/common.mk").path
         if !fm.fileExists(atPath: common) {
             issues.append(Issue(path: common, reason: AppLocalized("missing")))
         }
@@ -287,8 +276,6 @@ enum NativeRuntimeFailure: String, Sendable, Equatable {
     case timedOut
     case unknown
 
-    var isUsable: Bool { self == .none }
-
     var title: String {
         switch self {
         case .none: return AppLocalized("Ready")
@@ -297,22 +284,15 @@ enum NativeRuntimeFailure: String, Sendable, Equatable {
         case .spawnDenied: return AppLocalized("Cannot spawn the runtime shell")
         case .dyldBlocked: return AppLocalized("Runtime libraries cannot be loaded (libiosexec)")
         case .crashed: return AppLocalized("Runtime shell crashed")
-        case .runtimeDamaged: return AppLocalized("Runtime files are incomplete (zsh / libiosexec)")
+        case .runtimeDamaged: return AppLocalized("Runtime files are incomplete (shell / make / libraries)")
         case .timedOut: return AppLocalized("Runtime shell timed out")
         case .unknown: return AppLocalized("Runtime check failed")
         }
     }
 
-    /// 这类错误能不能靠「切回 iSH」立刻恢复。
-    var workaroundIsSandbox: Bool {
-        switch self {
-        case .spawnDenied, .dyldBlocked, .crashed, .runtimeDamaged, .timedOut, .unknown: return true
-        case .none, .toolchainMissing, .shellMissing: return false
-        }
-    }
 }
 
-/// 一次真实探针（spawn 一个 shell 并执行 printf）的结果。
+/// 一次 shell + make recipe 探针的结果，不代表编译/打包已验证。
 struct NativeRuntimeHealth: Sendable {
     let failure: NativeRuntimeFailure
     let shell: String?
@@ -344,26 +324,40 @@ final class NativeRuntimeHealthMonitor: ObservableObject {
     /// 结论的保鲜期。运行时不会在几秒内自己变好，但重装/切执行器后要能立刻重测。
     private let ttl: TimeInterval = 90
     private var lastCheck: Date?
+    private var lastGeneration: UInt64?
+    private var probeID = UUID()
 
     private init() {}
 
     func invalidate() {
+        probeID = UUID()
         health = nil
         lastCheck = nil
+        lastGeneration = nil
+        checking = false
     }
 
     /// 取健康结论；`force` 为真时无条件重新探测。
     @discardableResult
     func refresh(force: Bool = false) async -> NativeRuntimeHealth {
-        if !force, let cached = health, let stamp = lastCheck,
+        let generation = NativeToolchain.shared.generation
+        if !force, lastGeneration == generation, let cached = health, let stamp = lastCheck,
            Date().timeIntervalSince(stamp) < ttl {
             return cached
         }
+        let request = UUID()
+        probeID = request
         checking = true
         let result = await Self.probe()
-        health = result
-        lastCheck = Date()
-        checking = false
+        // A reinstall/reset while awaiting the probe invalidates its outcome.
+        if probeID == request {
+            checking = false
+            if NativeToolchain.shared.generation == generation {
+                health = result
+                lastCheck = Date()
+                lastGeneration = generation
+            }
+        }
         return result
     }
 
@@ -382,13 +376,37 @@ final class NativeRuntimeHealthMonitor: ObservableObject {
                                        checkedAt: Date())
         }
 
-        let env = toolchain.environment()
+        guard let make = toolchain.findTool("make") else {
+            return NativeRuntimeHealth(failure: .runtimeDamaged, shell: toolchain.shellPath,
+                                       theosRoot: root.path, exitCode: 127,
+                                       detail: "make is missing", checkedAt: Date())
+        }
+        let probe = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("minis-runtime-probe-" + UUID().uuidString, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: probe, withIntermediateDirectories: true)
+            // This tests make's child shell as well as the outer shell. It is
+            // intentionally NOT evidence of SDK compilation/signing/packaging.
+            try "all:\n\t@printf 'MINIS_RUNTIME_OK\\n'\n".write(
+                to: probe.appendingPathComponent("Makefile"), atomically: true, encoding: .utf8)
+        } catch {
+            return NativeRuntimeHealth(failure: .unknown, shell: toolchain.shellPath,
+                                       theosRoot: root.path, exitCode: -1,
+                                       detail: error.localizedDescription, checkedAt: Date())
+        }
+        defer { try? FileManager.default.removeItem(at: probe) }
+        let command = NativeCommandRunner.shellQuote(make)
+            + " --no-print-directory -f Makefile \"SHELL=$SHELL\" all"
         var firstFailure: NativeRuntimeHealth?
         // 最多试 5 个候选：每个 8 秒超时，12 个候选会把首屏拖到一分半。
         // 正常情况下第一个（运行时自带 shell）就会给出结论。
         for candidate in NativeCommandRunner.shellCandidates().prefix(5) {
-            let result = await NativeCommandRunner.run(command: "printf MINIS_RUNTIME_OK",
-                                                       in: NSTemporaryDirectory(),
+            var env = toolchain.environment()
+            env["SHELL"] = candidate
+            env["CONFIG_SHELL"] = candidate
+            env["CA_THEOS_BASH"] = candidate
+            let result = await NativeCommandRunner.run(command: command,
+                                                       in: probe.path,
                                                        environment: env,
                                                        timeout: 8,
                                                        shellOverride: candidate)
@@ -420,7 +438,7 @@ final class NativeRuntimeHealthMonitor: ObservableObject {
             }
             return failure
         }
-        return firstFailure ?? NativeRuntimeHealth(failure: .unknown, shell: toolchain.shellPath,
+        return NativeRuntimeHealth(failure: .shellMissing, shell: toolchain.shellPath,
                                                    theosRoot: root.path, exitCode: 0,
                                                    detail: "", checkedAt: Date())
     }
@@ -434,6 +452,10 @@ final class NativeRuntimeHealthMonitor: ObservableObject {
             failure = .dyldBlocked
         } else if lower.contains("could not start a process") || lower.contains("posix_spawn") {
             failure = .spawnDenied
+        } else if lower.contains("bad executable") || lower.contains("exec format error") {
+            failure = .runtimeDamaged
+        } else if lower.contains("no such file or directory") || lower.contains("command not found") {
+            failure = .shellMissing
         } else if exitCode == 134 {
             failure = .crashed
         } else if exitCode == 0 {

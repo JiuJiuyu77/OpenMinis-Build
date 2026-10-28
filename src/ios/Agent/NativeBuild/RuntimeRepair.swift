@@ -35,9 +35,9 @@ enum RuntimeRepair {
         case .shellMissing:
             return AppLocalized("Reinstall the Theos runtime — it has no usable shell inside.")
         case .runtimeDamaged:
-            return AppLocalized("Open Settings → Runtime diagnostics and tap One-tap repair: it reinstalls the incomplete runtime (zsh / libiosexec).")
+            return AppLocalized("Open Settings → Runtime diagnostics and tap One-tap repair: it reinstalls the incomplete runtime (shell / make / libraries).")
         case .spawnDenied, .dyldBlocked, .crashed, .timedOut, .unknown:
-            return AppLocalized("Open Settings → Runtime diagnostics and tap One-tap repair: it copies the runtime into the app container, then switches to the iSH sandbox if native execution is still impossible.")
+            return AppLocalized("Open Settings → Runtime diagnostics and tap One-tap repair: it rechecks the runtime and switches to iSH if native execution still fails. Only an external library-loading failure triggers a container copy.")
         }
     }
 
@@ -47,18 +47,16 @@ enum RuntimeRepair {
         if let health, health.ok {
             return AppLocalized("Native runtime verified — commands can run natively.")
         }
-        if !report.canRunNativeBinaries || report.sandboxed {
-            return AppLocalized("Neither TrollStore nor a jailbreak was detected, so the native runtime cannot load its own libraries (libiosexec). Everything is routed to the iSH sandbox.")
+        if !report.canRunNativeBinaries {
+            return AppLocalized("This build has no detected native execution entitlements. Automatic mode stays in iSH; an explicit native startup probe is authoritative.")
         }
         return AppLocalized("The environment allows native execution but the runtime failed its startup probe. Tap One-tap repair.")
     }
 
     /// 把外部运行时复制进 App 容器。
     ///
-    /// 这是 libiosexec 的**根因修复**：运行时放在别的 App 目录或共享目录时，
-    /// 沙箱会拦截 `mmap()`，dyld 直接 abort。复制到自己容器的
-    /// `Library/Application Support/NativeToolchain/` 后，App 有完整读写权限，
-    /// dylib 就能被正常映射。
+    /// 仅对用户显式指定的外部路径尝试迁移，随后仍必须重新探针。
+    /// 复制不会授予执行权限，也不能修复签名；已在容器内的树不重复复制。
     @MainActor
     static func importRuntimeIntoContainer(from theosRoot: String?) async -> (ok: Bool, message: String) {
         guard let rootPath = theosRoot, !rootPath.isEmpty else {
@@ -69,22 +67,31 @@ enum RuntimeRepair {
             return (false, AppLocalized("App container is not available."))
         }
         let container = support.appendingPathComponent("NativeToolchain", isDirectory: true)
-        if rootPath.hasPrefix(container.path) {
-            return (true, AppLocalized("The runtime is already inside the app container."))
+        let root = URL(fileURLWithPath: rootPath).standardizedFileURL
+        let resolvedRoot = root.resolvingSymlinksInPath().path
+        let supportPath = support.resolvingSymlinksInPath().path
+        if resolvedRoot == supportPath || resolvedRoot.hasPrefix(supportPath + "/") {
+            return (false, AppLocalized("The runtime is already inside the app container; copying it cannot repair signing or missing files."))
         }
-        let source = URL(fileURLWithPath: rootPath).deletingLastPathComponent()
+        let source = NativeToolchain.runtimeRoot(forTheos: root)
+        let relativeTheos = root.path == source.path ? "" : "theos"
         let dest = container.appendingPathComponent(source.lastPathComponent)
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: source.path) else {
+        guard FileManager.default.fileExists(atPath: source.path) else {
             return (false, AppLocalized("The runtime directory no longer exists: ") + source.path)
         }
 
         let errorText: String? = await Task.detached(priority: .userInitiated) { () -> String? in
             let fm = FileManager.default
             do {
-                try? fm.createDirectory(at: container, withIntermediateDirectories: true)
-                if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
-                try fm.copyItem(at: source, to: dest)
+                try fm.createDirectory(at: container, withIntermediateDirectories: true)
+                let staging = container.appendingPathComponent("import-" + UUID().uuidString)
+                defer { try? fm.removeItem(at: staging) }
+                try fm.copyItem(at: source, to: staging)
+                if fm.fileExists(atPath: dest.path) {
+                    _ = try fm.replaceItemAt(dest, withItemAt: staging)
+                } else {
+                    try fm.moveItem(at: staging, to: dest)
+                }
                 return nil
             } catch {
                 return error.localizedDescription
@@ -94,8 +101,7 @@ enum RuntimeRepair {
         if let errorText {
             return (false, AppLocalized("Copy failed: ") + errorText)
         }
-        let inner = dest.appendingPathComponent("theos", isDirectory: true)
-        let resolved = fm.fileExists(atPath: inner.appendingPathComponent("makefiles/common.mk").path) ? inner : dest
+        let resolved = relativeTheos.isEmpty ? dest : dest.appendingPathComponent(relativeTheos, isDirectory: true)
         NativeToolchain.manualRootPath = resolved.path
         NativeToolchain.shared.resetCache()
         NativeRuntimeHealthMonitor.shared.invalidate()
@@ -133,8 +139,9 @@ enum RuntimeRepair {
         var health = await NativeRuntimeHealthMonitor.shared.refresh(force: true)
         steps.append(AppLocalized("Probe: ") + health.summary)
 
-        // 3) libiosexec / spawn 拒绝：先把运行时搬进 App 容器再试一次。
-        if !health.ok, health.failure.workaroundIsSandbox, let root = health.theosRoot {
+        // 3) Only an external library-loading failure can benefit from relocation.
+        // Never duplicate an app-owned damaged runtime before identifying its id.
+        if health.failure == .dyldBlocked, let root = health.theosRoot {
             let imported = await importRuntimeIntoContainer(from: root)
             steps.append(imported.message)
             if imported.ok {
@@ -158,6 +165,8 @@ enum RuntimeRepair {
                let descriptor = DeveloperRuntimeManager.shared.runtimes.first(where: { $0.id == runtimeID }) {
                 steps.append(AppLocalized("Runtime files are incomplete — reinstalling ") + runtimeID + "…")
                 await DeveloperRuntimeManager.shared.installAndWait(descriptor)
+                NativeToolchain.shared.resetCache()
+                NativeRuntimeHealthMonitor.shared.invalidate()
                 health = await NativeRuntimeHealthMonitor.shared.refresh(force: true)
                 steps.append(AppLocalized("Probe after reinstall: ") + health.summary)
                 if health.ok {
@@ -216,7 +225,7 @@ enum RuntimeRepair {
             steps.append(AppLocalized("Environment: ") + host.summary)
             var health = await NativeRuntimeHealthMonitor.shared.refresh(force: true)
             steps.append(AppLocalized("Probe: ") + health.summary)
-            if !health.ok, health.failure.workaroundIsSandbox, let root = health.theosRoot {
+            if health.failure == .dyldBlocked, let root = health.theosRoot {
                 // libiosexec / 容器外 mmap 被拒：把运行时搬进 App 容器再试。
                 let imported = await importRuntimeIntoContainer(from: root)
                 steps.append(imported.message)
@@ -245,7 +254,7 @@ enum RuntimeRepair {
             // 真缺文件（截断、make 不在）才重装。
             var health = await NativeRuntimeHealthMonitor.shared.refresh(force: true)
             steps.append(AppLocalized("Probe: ") + health.summary)
-            if !health.ok, health.failure.workaroundIsSandbox, let root = health.theosRoot {
+            if health.failure == .dyldBlocked, let root = health.theosRoot {
                 let imported = await importRuntimeIntoContainer(from: root)
                 steps.append(imported.message)
                 if imported.ok {
@@ -285,7 +294,8 @@ enum RuntimeRepair {
             let report = await signOffMainThread(descriptor: descriptor, root: root, canExecuteNative: canRun)
             manager.updateSigning(report, for: descriptor.id)
             signedTotal += report.signedCount
-            failedTotal += report.failedPaths.count
+            failedTotal += max(report.failedPaths.count,
+                               report.status == .failed || report.status == .skipped || report.signedCount == 0 ? 1 : 0)
             steps.append("\(descriptor.id): \(report.status.rawValue) · \(AppLocalized("signed")) \(report.signedCount)"
                          + (report.failedPaths.isEmpty ? "" : " · \(AppLocalized("failed")) \(report.failedPaths.count)"))
             if let reason = report.reason { steps.append("  " + reason) }
@@ -332,7 +342,7 @@ enum RuntimeRepair {
             let root = DeveloperRuntimePaths.runtimeRoot(id: descriptor.id)
             let report = await RuntimeInstallVerifier.verify(descriptor: descriptor,
                                                              root: root,
-                                                             canExecuteNative: true)
+                                                             canExecuteNative: MinisHostEnvironmentDetector.cached.canRunNativeBinaries)
             manager.updateVerification(report, for: descriptor.id)
             steps.append("\(descriptor.id): \(report.status.rawValue)"
                          + (report.missingPaths.isEmpty ? "" : " · \(AppLocalized("missing")) \(report.missingPaths.count)")
@@ -367,6 +377,8 @@ enum RuntimeRepair {
         }
         steps.append(AppLocalized("Reinstalling ") + runtimeID + "…")
         await DeveloperRuntimeManager.shared.installAndWait(descriptor)
+        NativeToolchain.shared.resetCache()
+        NativeRuntimeHealthMonitor.shared.invalidate()
         health = await NativeRuntimeHealthMonitor.shared.refresh(force: true)
         steps.append(AppLocalized("Probe after reinstall: ") + health.summary)
         return RuntimeRepairReport(title: health.ok ? AppLocalized("Runtime reinstalled")
@@ -377,10 +389,10 @@ enum RuntimeRepair {
     /// 从 `DeveloperRuntime/installed/<id>/...` 里解出运行时 id。
     nonisolated static func installedRuntimeID(from path: String?) -> String? {
         guard let path else { return nil }
-        let marker = "/DeveloperRuntime/installed/"
-        guard let range = path.range(of: marker) else { return nil }
-        let rest = path[range.upperBound...]
-        return rest.split(separator: "/").first.map(String.init)
+        let base = DeveloperRuntimePaths.installedRoot.resolvingSymlinksInPath().path
+        let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        guard resolved.hasPrefix(base + "/") else { return nil }
+        return resolved.dropFirst(base.count + 1).split(separator: "/").first.map(String.init)
     }
 
     /// 把执行器落到 iSH 沙箱，并把这一步写进报告。
@@ -410,8 +422,8 @@ enum RuntimeRepair {
                 return runtimeBinaryDamage(path) != nil
             }
             if damaged {
-                try? FileManager.default.removeItem(at: dir)
-                removed.append(id)
+                manager.remove(id)
+                if !FileManager.default.fileExists(atPath: dir.path) { removed.append(id) }
             }
         }
         if !removed.isEmpty {

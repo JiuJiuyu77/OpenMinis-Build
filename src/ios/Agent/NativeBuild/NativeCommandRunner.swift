@@ -7,6 +7,7 @@
 //
 
 import Foundation
+import Darwin
 
 enum NativeCommandRunner {
 
@@ -18,7 +19,8 @@ enum NativeCommandRunner {
         var ok: Bool { exitCode == 0 && !timedOut }
     }
 
-    private static let queue = DispatchQueue(label: "app.minis.native-build.runner", qos: .userInitiated)
+    private static let queue = DispatchQueue(label: "app.minis.native-build.runner",
+                                             qos: .userInitiated, attributes: .concurrent)
 
     /// Why spawning failed, in words a user can act on. `posix_spawn` answers
     /// with an errno; "no-sandbox permission" was only ever a guess, and it is
@@ -121,7 +123,8 @@ enum NativeCommandRunner {
             }
         }
 
-        for (key, value) in environment where !key.contains("=") {
+        for (key, value) in environment
+            where !key.isEmpty && !key.contains("=") && !key.utf8.contains(0) && !value.utf8.contains(0) {
             envPairs.append("\(key)=\(value)")
         }
 
@@ -158,11 +161,25 @@ enum NativeCommandRunner {
 
             var attr: posix_spawnattr_t? = nil
             posix_spawnattr_init(&attr)
-            posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGDEF))
+            posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK))
             posix_spawnattr_setpgroup(&attr, 0)
+            var mask = sigset_t()
+            sigemptyset(&mask)
+            posix_spawnattr_setsigmask(&attr, &mask)
             var defaults = sigset_t()
             sigemptyset(&defaults)
+            for signal in [SIGPIPE, SIGINT, SIGTERM, SIGHUP, SIGQUIT] {
+                sigaddset(&defaults, signal)
+            }
             posix_spawnattr_setsigdefault(&attr, &defaults)
+            let identityError = NativeSpawnIdentity.configure(&attr)
+            if identityError != 0 {
+                posix_spawn_file_actions_destroy(&actions)
+                posix_spawnattr_destroy(&attr)
+                close(outPipe[0]); close(outPipe[1])
+                return Result(output: "Root persona configuration failed (\(identityError)); refusing a silently downgraded runtime command.",
+                              exitCode: 126, duration: Date().timeIntervalSince(started), timedOut: false)
+            }
 
             let argv: [String] = [shell, "-lc", script]
             let (child, rc) = await withCheckedContinuation {
@@ -218,20 +235,30 @@ enum NativeCommandRunner {
         let collector = LineCollector(onLine: onLine)
         let reader = DispatchQueue(label: "app.minis.native-build.reader")
         let finished = DispatchSemaphore(value: 0)
+        let readerState = NativePipeReaderState()
 
         reader.async {
-            let handle = FileHandle(fileDescriptor: outPipe[0], closeOnDealloc: true)
-            while true {
-                let data = handle.availableData
-                if data.isEmpty { break }
-                collector.append(data)
+            defer { close(outPipe[0]); finished.signal() }
+            var bytes = [UInt8](repeating: 0, count: 16_384)
+            while !readerState.stopped {
+                // A descendant may keep stdout open after the shell exits.
+                // Polling lets us stop the reader instead of leaking an FD and
+                // a blocked thread for every background command.
+                var descriptor = pollfd(fd: outPipe[0], events: Int16(POLLIN | POLLHUP), revents: 0)
+                let ready = poll(&descriptor, 1, 200)
+                if ready < 0 { if errno == EINTR { continue }; break }
+                if ready == 0 { continue }
+                let count = read(outPipe[0], &bytes, bytes.count)
+                if count > 0 { collector.append(Data(bytes.prefix(count))) }
+                else if count == 0 { break }
+                else if errno != EINTR { break }
             }
-            finished.signal()
         }
 
         let deadline = timeout > 0 ? Date().addingTimeInterval(timeout) : Date.distantFuture
         var timedOut = false
         var status: Int32 = 0
+        var waitError: Int32 = 0
 
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             queue.async {
@@ -242,13 +269,15 @@ enum NativeCommandRunner {
                         status = st
                         break
                     }
-                    if r < 0 && errno != EINTR { break }
+                    if r < 0 && errno != EINTR { waitError = errno; break }
                     if Date() > deadline {
                         timedOut = true
                         kill(-pid, SIGTERM)
                         usleep(800_000)
                         kill(-pid, SIGKILL)
-                        _ = waitpid(pid, &st, 0)
+                        while waitpid(pid, &st, 0) < 0 {
+                            if errno != EINTR { waitError = errno; break }
+                        }
                         status = st
                         break
                     }
@@ -258,10 +287,22 @@ enum NativeCommandRunner {
             }
         }
 
-        _ = finished.wait(timeout: .now() + 2)
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            queue.async {
+                if finished.wait(timeout: .now() + 2) == .timedOut {
+                    readerState.stop()
+                    finished.wait()
+                }
+                cont.resume()
+            }
+        }
+        if waitError != 0 {
+            collector.append(Data("waitpid failed (\(waitError): \(String(cString: strerror(waitError))))\n".utf8))
+        }
         collector.flush()
 
-        let code: Int32 = (status & 0x7f) == 0 ? (status >> 8) & 0xff : 128 + (status & 0x7f)
+        let code: Int32 = timedOut ? 124 : waitError != 0 ? 126
+            : (status & 0x7f) == 0 ? (status >> 8) & 0xff : 128 + (status & 0x7f)
         return Result(output: collector.text,
                       exitCode: code,
                       duration: Date().timeIntervalSince(started),
@@ -288,10 +329,45 @@ enum NativeCommandRunner {
     }
 }
 
-/// 把字节流按行切分，避免多字节字符被截断。
+/// Shared by command execution, direct offload and installer probes. Root
+/// persona is a child-only spawn attribute; the app's own uid never changes.
+/// MT reference: launcher 0x100026504–0x1000265a4, persona 99 + override 1,
+/// uid/gid 0. Ordinary macOS test hosts keep their current identity.
+enum NativeSpawnIdentity {
+    static func configure(_ attributes: inout posix_spawnattr_t?) -> Int32 {
+        #if os(iOS)
+        if geteuid() == 0 { return 0 }
+        guard MinisHostEnvironmentDetector.cached.hasNativeEntitlements else { return 0 }
+        typealias Persona = @convention(c) (UnsafeMutablePointer<posix_spawnattr_t?>, uid_t, UInt32) -> Int32
+        typealias Identity = @convention(c) (UnsafeMutablePointer<posix_spawnattr_t?>, UInt32) -> Int32
+        let handle = UnsafeMutableRawPointer(bitPattern: -2)
+        guard let persona = dlsym(handle, "posix_spawnattr_set_persona_np"),
+              let uid = dlsym(handle, "posix_spawnattr_set_persona_uid_np"),
+              let gid = dlsym(handle, "posix_spawnattr_set_persona_gid_np") else { return ENOTSUP }
+        let setPersona = unsafeBitCast(persona, to: Persona.self)
+        let setUID = unsafeBitCast(uid, to: Identity.self)
+        let setGID = unsafeBitCast(gid, to: Identity.self)
+        let personaResult = setPersona(&attributes, 99, 1)
+        guard personaResult == 0 else { return personaResult }
+        let uidResult = setUID(&attributes, 0)
+        guard uidResult == 0 else { return uidResult }
+        return setGID(&attributes, 0)
+        #else
+        return 0
+        #endif
+    }
+}
+
+private final class NativePipeReaderState {
+    private let lock = NSLock()
+    private var value = false
+    var stopped: Bool { lock.lock(); defer { lock.unlock() }; return value }
+    func stop() { lock.lock(); value = true; lock.unlock() }
+}
+
+/// 按原始换行字节分帧，再解码完整行。无效 UTF-8 不会吞掉后续全部输出。
 private final class LineCollector {
     private var buffer = Data()
-    private var pending = ""
     private var all = ""
     private let onLine: ((String) -> Void)?
     private let lock = NSLock()
@@ -301,24 +377,17 @@ private final class LineCollector {
     func append(_ data: Data) {
         lock.lock(); defer { lock.unlock() }
         buffer.append(data)
-        guard let text = String(data: buffer, encoding: .utf8) else { return }
-        buffer.removeAll(keepingCapacity: true)
-        pending += text
-        while let idx = pending.firstIndex(of: "\n") {
-            let line = String(pending[pending.startIndex..<idx])
-            pending = String(pending[pending.index(after: idx)...])
+        while let index = buffer.firstIndex(of: 0x0a) {
+            let line = String(decoding: buffer[..<index], as: UTF8.self)
+            buffer.removeSubrange(...index)
             emit(line)
         }
     }
 
     func flush() {
         lock.lock(); defer { lock.unlock() }
-        if !pending.isEmpty {
-            emit(pending)
-            pending = ""
-        }
-        if let rest = String(data: buffer, encoding: .isoLatin1), !rest.isEmpty {
-            emit(rest)
+        if !buffer.isEmpty {
+            emit(String(decoding: buffer, as: UTF8.self))
             buffer.removeAll()
         }
     }

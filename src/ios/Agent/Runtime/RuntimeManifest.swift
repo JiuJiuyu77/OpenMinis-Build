@@ -128,6 +128,41 @@ struct RuntimeDescriptor: Codable, Identifiable, Hashable {
     /// 没有 `install` 块时返回空规格，调用方不必到处判断可选值。
     var installSpecOrNone: RuntimeInstallSpec { install ?? .none }
 
+    /// Excludes the agent, not codex-sign or Node's lib/codex tool shims.
+    static func isAgentIdentifier(_ value: String) -> Bool {
+        let value = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return value == "codex" || value.hasPrefix("codex.")
+    }
+
+    var isSupportedRuntime: Bool {
+        !Self.isAgentIdentifier(id)
+            && !Self.isAgentIdentifier(handler ?? "")
+            && !(provides ?? []).contains(where: Self.isAgentIdentifier)
+            && !(capabilities ?? [:]).keys.contains(where: Self.isAgentIdentifier)
+    }
+
+    var installationIssue: String? {
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
+        guard !id.isEmpty, id.unicodeScalars.allSatisfy({ allowed.contains($0) }) else {
+            return "Runtime id must be a non-empty filesystem-safe identifier."
+        }
+        guard isSupportedRuntime else { return "Codex agent runtimes are not supported by Minis." }
+        guard ["portable-v1", "theos", "python", "reverse_tools"].contains(handler ?? "portable-v1") else {
+            return "Unsupported runtime handler: \(handler ?? "")"
+        }
+        guard let url = URL(string: archiveURL), url.scheme?.lowercased() == "https", url.host != nil else {
+            return "Runtime archive URL must use HTTPS."
+        }
+        guard archiveSHA256.count == 64,
+              archiveSHA256.utf8.allSatisfy({ (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0) }) else {
+            return "Runtime archive SHA-256 must contain 64 hexadecimal characters."
+        }
+        guard (downloadSize ?? 0) >= 0, (unpackedSize ?? 0) >= 0 else {
+            return "Runtime sizes cannot be negative."
+        }
+        return nil
+    }
+
     var downloadBytes: Int64 { downloadSize ?? 0 }
     var unpackedBytes: Int64 { unpackedSize ?? 0 }
     /// Sequential order inside a group; the manifest uses 5/10/15/20/30.
@@ -142,7 +177,7 @@ struct RuntimeDescriptor: Codable, Identifiable, Hashable {
     }
 
     var archiveFormat: ArchiveFormat? {
-        let path = (assetName ?? archiveURL).lowercased()
+        let path = (assetName ?? URL(string: archiveURL)?.path ?? archiveURL).lowercased()
         if path.hasSuffix(".tar.gz") || path.hasSuffix(".tgz") { return .tarGz }
         if path.hasSuffix(".deb") { return .deb }
         return nil
@@ -335,8 +370,16 @@ enum RuntimeManifestLoader {
     private static func decode(_ data: Data) throws -> RuntimeManifest {
         do {
             let manifest = try JSONDecoder().decode(RuntimeManifest.self, from: data)
+            guard manifest.schema == 4 else {
+                throw LoadError.invalidManifest("unsupported manifest schema")
+            }
             guard !manifest.runtimes.isEmpty else {
                 throw LoadError.invalidManifest("no runtimes")
+            }
+            for descriptor in manifest.orderedRuntimes where descriptor.isSupportedRuntime {
+                if let issue = descriptor.installationIssue {
+                    throw LoadError.invalidManifest("\(descriptor.id): \(issue)")
+                }
             }
             return manifest
         } catch let error as LoadError {
@@ -456,6 +499,7 @@ extension RuntimeDescriptor {
                           capabilities: capabilities,
                           ui: ui,
                           assetName: assetName,
-                          runtimeFormat: runtimeFormat)
+                          runtimeFormat: runtimeFormat,
+                          install: install)
     }
 }

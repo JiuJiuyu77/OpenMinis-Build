@@ -93,8 +93,12 @@ enum RuntimeSigner {
                             timeout: TimeInterval = 180) -> RuntimeSignReport {
         let spec = descriptor.installSpecOrNone
         let targets = spec.signTargets(in: root)
-        let entitlementsTargets = targets.entitlements.map { root.appendingPathComponent($0) }
-        let adhocTargets = targets.adhoc.map { root.appendingPathComponent($0) }
+        let unsafe = (targets.entitlements + targets.adhoc).filter {
+            RuntimePathPolicy.containedURL($0, in: root) == nil
+        }
+        guard unsafe.isEmpty else { return .failed("Unsafe signing targets", paths: unsafe) }
+        let entitlementsTargets = targets.entitlements.compactMap { RuntimePathPolicy.containedURL($0, in: root) }
+        let adhocTargets = targets.adhoc.compactMap { RuntimePathPolicy.containedURL($0, in: root) }
 
         guard !entitlementsTargets.isEmpty || !adhocTargets.isEmpty else {
             return RuntimeSignReport(status: .skipped, mode: nil, signedCount: 0, failedPaths: [],
@@ -106,23 +110,52 @@ enum RuntimeSigner {
                                      reason: AppLocalized("Cannot run the signing tools in this environment."),
                                      ldidPath: nil, codexSignPath: nil, checkedAt: Date())
         }
-        let ldid = locateLdid()
+        let ldid = locateLdid(stagingRoot: root)
         let codexSign = locateCodexSign()
+        let overlay = RuntimeEnvironmentOverlay.build(descriptor: descriptor, root: root)
+        var signingEnvironment = ProcessInfo.processInfo.environment
+        signingEnvironment.merge(overlay.exports) { _, runtime in runtime }
+        if let prefix = overlay.pathPrefix {
+            signingEnvironment["PATH"] = prefix + ":" + (signingEnvironment["PATH"] ?? "/usr/bin:/bin")
+        }
         guard ldid != nil || codexSign != nil else {
             return .failed(AppLocalized("Neither ldid nor codex-sign was found."))
         }
-        guard let entitlements = entitlementsPlist() else {
+        let entitlements = entitlementsPlist() ?? [:]
+        guard entitlementsTargets.isEmpty || !entitlements.isEmpty else {
             return .failed(AppLocalized("This app is not signed with native entitlements, so runtime binaries cannot be made executable."),
                            ldid: ldid?.path)
         }
-
+        // Bootstrap the staged signer itself before asking it to sign others.
+        if let ldid, let codexSign,
+           ldid.path.hasPrefix(root.standardizedFileURL.path + "/") {
+            let bootstrap = RuntimeProbeRunner.run(executable: codexSign.path,
+                arguments: ["--adhoc-only", ldid.path], environment: signingEnvironment,
+                workingDirectory: root.path, timeout: timeout)
+            guard bootstrap.spawnError == nil, !bootstrap.timedOut, bootstrap.status == 0 else {
+                return .failed(bootstrap.spawnError ?? bootstrap.output, paths: [ldid.path],
+                               ldid: ldid.path, codex: codexSign.path)
+            }
+        }
+        let plistURL = entitlements.isEmpty ? nil : writeTemporaryPlist(entitlements)
+        guard entitlements.isEmpty || plistURL != nil else {
+            return .failed("Cannot write signing entitlements", ldid: ldid?.path)
+        }
+        defer { if let plistURL { try? FileManager.default.removeItem(at: plistURL) } }
         var signed = 0
         var failed: [String] = []
         var lastOutput = ""
-        let plistURL = writeTemporaryPlist(entitlements)
 
+        var seenTargets = Set<String>()
         for target in entitlementsTargets + adhocTargets {
+            let resolved = target.resolvingSymlinksInPath()
+            guard seenTargets.insert(resolved.path).inserted else { continue }
             let isAdhocOnly = adhocTargets.contains(target)
+            guard FileManager.default.fileExists(atPath: target.path) else {
+                failed.append(target.path)
+                lastOutput = "Declared signing target is missing"
+                continue
+            }
             guard isMachO(target) else { continue }
             let name = target.lastPathComponent
 
@@ -135,7 +168,7 @@ enum RuntimeSigner {
                     : ["-S" + (plistURL?.path ?? ""), target.path]
                 let ldidResult = RuntimeProbeRunner.run(executable: ldid.path,
                                                         arguments: ldidArguments,
-                                                        environment: ProcessInfo.processInfo.environment,
+                                                        environment: signingEnvironment,
                                                         workingDirectory: root.path,
                                                         timeout: timeout)
                 lastOutput = ldidResult.output
@@ -144,7 +177,7 @@ enum RuntimeSigner {
             if !adhocDone, let codexSign {
                 let bootstrap = RuntimeProbeRunner.run(executable: codexSign.path,
                                                        arguments: ["--adhoc-only", target.path],
-                                                       environment: ProcessInfo.processInfo.environment,
+                                                       environment: signingEnvironment,
                                                        workingDirectory: root.path,
                                                        timeout: timeout)
                 lastOutput = bootstrap.output
@@ -169,7 +202,7 @@ enum RuntimeSigner {
             codexArguments.append(target.path)
             let codexResult = RuntimeProbeRunner.run(executable: codexSign.path,
                                                      arguments: codexArguments,
-                                                     environment: ProcessInfo.processInfo.environment,
+                                                     environment: signingEnvironment,
                                                      workingDirectory: root.path,
                                                      timeout: timeout)
             lastOutput = codexResult.output
@@ -179,8 +212,6 @@ enum RuntimeSigner {
             }
             signed += 1
         }
-
-        if let plistURL { try? FileManager.default.removeItem(at: plistURL) }
 
         if !failed.isEmpty {
             let snippet = lastOutput.split(separator: "\n").suffix(3).joined(separator: " | ")
@@ -305,9 +336,14 @@ enum RuntimeSigner {
     }
 
     /// `ldid` 由 Theos 运行时提供（`usr/bin/ldid` 或 `bin/ldid`）。
-    static func locateLdid() -> URL? {
+    static func locateLdid(stagingRoot: URL? = nil) -> URL? {
         let fm = FileManager.default
         var candidates: [URL] = []
+        if let stagingRoot {
+            for path in ["usr/bin/ldid", "bin/ldid", "theos/toolchain/linux/iphone/bin/ldid"] {
+                if let url = RuntimePathPolicy.containedURL(path, in: stagingRoot) { candidates.append(url) }
+            }
+        }
         for root in installedRuntimeRoots() {
             candidates.append(root.appendingPathComponent("usr/bin/ldid"))
             candidates.append(root.appendingPathComponent("bin/ldid"))

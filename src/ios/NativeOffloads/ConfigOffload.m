@@ -45,15 +45,14 @@
                              skipConfirmation:(BOOL)skipConfirmation;
 @end
 
-/// [T-ish-runtime-bridge] Swift 侧的运行时桥（见 RuntimeOffloadBridge.swift）。
-@interface MinisRuntimeOffloadBridge : NSObject
-+ (int)runTool:(NSString * _Nonnull)tool
-     arguments:(NSArray<NSString *> * _Nonnull)arguments
-         stdin:(int)stdinFD
-        stdout:(int)stdoutFD
-        stderr:(int)stderrFD;
-@end
 #endif
+
+// Stable, link-time checked C ABI. Using stdin/stdout/stderr as Objective-C
+// selector components lets stdio.h macros silently rewrite the selector.
+extern int32_t minis_runtime_bridge_version(void);
+extern int32_t minis_runtime_run_tool(int32_t argc, char * const *argv,
+                                     int32_t input_fd, int32_t output_fd,
+                                     int32_t error_fd);
 
 static NSString *const TOOL_NAME = @"minis-config";
 
@@ -492,17 +491,24 @@ static int minis_runtime_handler(int argc, char **argv,
         if (stderr_fd >= 0) { (void)!write(stderr_fd, usage, strlen(usage)); }
         return 2;
     }
-    NSString *tool = [NSString stringWithUTF8String:argv[1]] ?: @"";
-    NSMutableArray<NSString *> *args = [NSMutableArray arrayWithCapacity:(NSUInteger)(argc - 2)];
-    for (int i = 2; i < argc; i++) {
-        NSString *arg = [NSString stringWithUTF8String:argv[i]];
-        [args addObject:arg ?: @""];
+    if (strcmp(argv[1], "--doctor") == 0 || strcmp(argv[1], "--self-test") == 0) {
+        noff_emit_json(stdout_fd, @{
+            @"bridge_version": @(minis_runtime_bridge_version()),
+            @"cabi_symbol": @YES, @"usable": @YES, @"path": @"c-abi-linked",
+            @"scope": @"bridge-only; use runtime probes to verify installed tools"
+        }, YES, NO);
+        return 0;
     }
-    return (int)[MinisRuntimeOffloadBridge runTool:tool
-                                         arguments:args
-                                             stdin:stdin_fd
-                                            stdout:stdout_fd
-                                            stderr:stderr_fd];
+    @try {
+        return (int)minis_runtime_run_tool(argc - 1, argv + 1,
+                                          stdin_fd, stdout_fd, stderr_fd);
+    } @catch (NSException *exception) {
+        // Never let an Objective-C exception abort an iSH emulation thread.
+        const char *message = "minis-runtime: native bridge raised an exception; see app diagnostics\n";
+        if (stderr_fd >= 0) { (void)!write(stderr_fd, message, strlen(message)); }
+        NSLog(@"minis-runtime: %@: %@", exception.name, exception.reason);
+        return 126;
+    }
 }
 
 void config_offload_register(void) {

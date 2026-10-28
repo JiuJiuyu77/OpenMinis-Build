@@ -84,8 +84,7 @@ enum RuntimeTarGzExtractor {
                 }
                 if chunk.isEmpty { break }
 
-                let plain = try inflater.inflate(chunk)
-                if !plain.isEmpty {
+                try inflater.inflate(chunk, isCancelled: isCancelled) { plain in
                     try autoreleasepool { try parser.consume(plain) }
                 }
                 // Keep reading until the file itself ends: a gzip stream may
@@ -101,7 +100,7 @@ enum RuntimeTarGzExtractor {
         }
 
         guard inflater.didReadHeader else { throw ExtractError.notGzip }
-        guard inflater.didSeeMemberEnd else { throw ExtractError.truncated }
+        guard inflater.didSeeMemberEnd, inflater.isAtMemberEnd else { throw ExtractError.truncated }
         try parser.finish()
         logger.info("Extracted \(parser.entriesWritten) entries, \(parser.bytesWritten) bytes to \(destination.lastPathComponent)")
     }
@@ -171,9 +170,9 @@ enum RuntimeTarGzExtractor {
             initialised = true
         }
 
-        func inflate(_ input: Data) throws -> Data {
+        func inflate(_ input: Data, isCancelled: () -> Bool,
+                     consume: (Data) throws -> Void) throws {
             try startIfNeeded()
-            var output = Data()
             // A gzip file may contain concatenated members, and a member
             // boundary can fall inside one read chunk. Consume the remainder
             // of the chunk after restarting instead of dropping it.
@@ -186,11 +185,13 @@ enum RuntimeTarGzExtractor {
                 var buffer = [UInt8](repeating: 0, count: copyBuffer)
                 var offset = 0
                 while offset < raw.count {
-                    if reachedStreamEnd { restartForNextMember() }
+                    if isCancelled() { throw CancellationError() }
+                    if reachedStreamEnd { try restartForNextMember() }
                     stream.next_in = UnsafeMutablePointer<Bytef>(mutating: base + offset)
                     stream.avail_in = uInt(raw.count - offset)
 
                     while true {
+                        if isCancelled() { throw CancellationError() }
                         // Failures return zlib's own negative code
                         // (Z_BUF_ERROR is -5), so they can never be confused
                         // with a byte count. A truncated member returns
@@ -203,6 +204,8 @@ enum RuntimeTarGzExtractor {
                             if status == Z_STREAM_END {
                                 reachedStreamEnd = true
                                 didSeeMemberEnd = true
+                            } else if status == Z_BUF_ERROR && stream.avail_in == 0 {
+                                return 0
                             } else if status != Z_OK {
                                 return Int(status)
                             }
@@ -212,10 +215,10 @@ enum RuntimeTarGzExtractor {
                             return out.count - Int(stream.avail_out)
                         }
                         if produced < 0 {
-                            throw ExtractError.corrupt("inflate returned \(-produced)")
+                            throw ExtractError.corrupt("inflate returned \(produced)")
                         }
                         if produced > 0 {
-                            output.append(contentsOf: buffer[0..<produced])
+                            try consume(Data(buffer[0..<produced]))
                             totalOut += Int64(produced)
                         }
                         // Only stop at end-of-member, when the input is truly
@@ -224,7 +227,7 @@ enum RuntimeTarGzExtractor {
                         // remain, so that case must loop again; calling
                         // inflate with `avail_in == 0` returns Z_BUF_ERROR.
                         if reachedStreamEnd { break }
-                        if stream.avail_in == 0 { break }
+                        if stream.avail_in == 0 && stream.avail_out > 0 { break }
                         if produced == 0 { break }
                     }
 
@@ -240,17 +243,17 @@ enum RuntimeTarGzExtractor {
                     }
                 }
             }
-            return output
         }
 
         private var reachedStreamEnd = false
+        var isAtMemberEnd: Bool { reachedStreamEnd }
 
-        private func restartForNextMember() {
+        private func restartForNextMember() throws {
             inflateEnd(&stream)
             stream = z_stream()
             initialised = false
             reachedStreamEnd = false
-            try? startIfNeeded()
+            try startIfNeeded()
         }
     }
 
@@ -266,6 +269,8 @@ enum RuntimeTarGzExtractor {
         private var remaining: Int64 = 0
         private var padRemaining: Int64 = 0
         private var longName: String?
+        private var longLink: String?
+        private var metadataIsLink = false
         private var metaBuffer: Data?
         private(set) var bytesWritten: Int64 = 0
         private(set) var entriesWritten = 0
@@ -321,7 +326,8 @@ enum RuntimeTarGzExtractor {
         }
 
         mutating func finish() throws {
-            guard current == nil, remaining == 0, padRemaining == 0 else {
+            guard current == nil, remaining == 0, padRemaining == 0, buffer.allSatisfy({ $0 == 0 }),
+                  longName == nil, longLink == nil, metaBuffer == nil else {
                 throw ExtractError.truncated
             }
             guard sawTerminator else { throw ExtractError.truncated }
@@ -354,23 +360,28 @@ enum RuntimeTarGzExtractor {
                 // still accepts every well-formed archive; a stream that ends
                 // without one is caught by `finish()`.
                 sawTerminator = true
-                longName = nil
                 return
             }
             guard header.count >= 512 else { throw ExtractError.truncated }
+            guard !sawTerminator else { throw ExtractError.corrupt("entry after tar terminator") }
+            let checksum = try octal(header, 148, 8)
+            let actual = header.enumerated().reduce(Int64(0)) { sum, item in
+                sum + Int64((148..<156).contains(item.offset) ? 32 : item.element)
+            }
+            guard checksum == actual else { throw ExtractError.corrupt("tar header checksum mismatch") }
 
             let type = header[156]
             let size = try octal(header, 124, 12)
             let mode = try octal(header, 100, 8)
             let name = try stringField(header, 0, 100)
             let prefix = try stringField(header, 345, 155)
-            let linkTarget = try stringField(header, 157, 100)
+            var linkTarget = try stringField(header, 157, 100)
 
             if type == UInt8(ascii: "L") || type == UInt8(ascii: "K") {
                 guard size <= Int64(maxStringField) else {
                     throw ExtractError.corrupt("oversized GNU long-name record")
                 }
-                longName = nil
+                metadataIsLink = type == UInt8(ascii: "K")
                 metaBuffer = Data()
                 metaBuffer?.reserveCapacity(Int(size))
                 remaining = size
@@ -387,12 +398,18 @@ enum RuntimeTarGzExtractor {
 
             var full = prefix.isEmpty ? name : "\(prefix)/\(name)"
             if let longName { full = longName }
+            if let longLink { linkTarget = longLink }
             longName = nil
+            longLink = nil
 
+            guard !full.hasPrefix("/") else { throw ExtractError.unsafePath(full) }
             if full.hasPrefix("./") { full.removeFirst(2) }
-            while full.hasPrefix("/") { full.removeFirst() }
             while full.count > 1, full.hasSuffix("/") { full.removeLast() }
 
+            // tar -C tree . emits ./ as a harmless root directory entry.
+            if full.isEmpty && type == UInt8(ascii: "5") {
+                full = "."
+            }
             let resolved = try safeDestination(for: full)
             let isDirectory = type == UInt8(ascii: "5") || full.hasSuffix("/")
             let isSymlink = type == UInt8(ascii: "2")
@@ -400,6 +417,12 @@ enum RuntimeTarGzExtractor {
             let isRegular = type == 0 || type == UInt8(ascii: "0") || type == UInt8(ascii: "7")
 
             let fm = FileManager.default
+            guard !(isDirectory || isSymlink || isHardlink) || size == 0 else {
+                throw ExtractError.corrupt("non-file tar entry has a payload")
+            }
+            guard isDirectory || resolved.standardizedFileURL != destination.standardizedFileURL else {
+                throw ExtractError.unsafePath(full)
+            }
 
             if isDirectory {
                 try fm.createDirectory(at: resolved, withIntermediateDirectories: true)
@@ -416,18 +439,10 @@ enum RuntimeTarGzExtractor {
                 if !linkTarget.isEmpty {
                     if isContainedLinkTarget(linkTarget, at: parent) {
                         try? fm.removeItem(at: resolved)
-                        do {
-                            try fm.createSymbolicLink(atPath: resolved.path,
-                                                      withDestinationPath: linkTarget)
-                        } catch {
-                            // A dylib shipped as a relative symlink is not
-                            // worth failing a 1GB runtime over; log and go on.
-                            logger.warning("Symlink \(full) -> \(linkTarget) failed: \(error.localizedDescription)")
-                        }
+                        try fm.createSymbolicLink(atPath: resolved.path,
+                                                  withDestinationPath: linkTarget)
                     } else {
-                        // A later member could otherwise write *through* the
-                        // link to an arbitrary location outside the install.
-                        logger.warning("Skipping symlink escaping the runtime root: \(full) -> \(linkTarget)")
+                        throw ExtractError.unsafePath("\(full) -> \(linkTarget)")
                     }
                 }
                 entriesWritten += 1
@@ -438,10 +453,10 @@ enum RuntimeTarGzExtractor {
             if isHardlink {
                 let parent = resolved.deletingLastPathComponent()
                 try fm.createDirectory(at: parent, withIntermediateDirectories: true)
-                if let target = try? safeDestination(for: linkTarget), !linkTarget.isEmpty {
-                    try? fm.removeItem(at: resolved)
-                    try? fm.linkItem(at: target, to: resolved)
-                }
+                let target = try safeDestination(for: linkTarget)
+                guard target != resolved else { throw ExtractError.unsafePath(full) }
+                try? fm.removeItem(at: resolved)
+                try fm.linkItem(at: target, to: resolved)
                 entriesWritten += 1
                 padRemaining = size % 512 == 0 ? 0 : 512 - (size % 512)
                 return
@@ -453,6 +468,11 @@ enum RuntimeTarGzExtractor {
 
             try fm.createDirectory(at: resolved.deletingLastPathComponent(),
                                    withIntermediateDirectories: true)
+            // Never truncate through a symlink or a previous hardlink inode.
+            // A duplicate regular entry replaces that directory entry only.
+            if (try? fm.attributesOfItem(atPath: resolved.path)) != nil {
+                try fm.removeItem(at: resolved)
+            }
             guard fm.createFile(atPath: resolved.path, contents: nil) else {
                 throw ExtractError.writeFailed(full, CocoaError(.fileWriteUnknown))
             }
@@ -475,7 +495,8 @@ enum RuntimeTarGzExtractor {
             try? sink?.close()
             sink = nil
             if let meta = metaBuffer {
-                longName = String(decoding: meta.prefix { $0 != 0 }, as: UTF8.self)
+                let value = String(decoding: meta.prefix { $0 != 0 }, as: UTF8.self)
+                if metadataIsLink { longLink = value } else { longName = value }
                 metaBuffer = nil
                 current = nil
                 return
@@ -494,22 +515,10 @@ enum RuntimeTarGzExtractor {
 
         /// Reject absolute paths and `..` escapes before anything is written.
         private func safeDestination(for path: String) throws -> URL {
-            let trimmed = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-            guard !trimmed.isEmpty else { throw ExtractError.unsafePath(path) }
-            var candidate = destination
-            for component in trimmed.split(separator: "/", omittingEmptySubsequences: true) {
-                let part = String(component)
-                if part == "." { continue }
-                if part == ".." { throw ExtractError.unsafePath(path) }
-                if part.contains("\0") { throw ExtractError.unsafePath(path) }
-                candidate.appendPathComponent(part)
-            }
-            let root = destination.standardizedFileURL.path
-            let resolved = candidate.standardizedFileURL.path
-            guard resolved == root || resolved.hasPrefix(root + "/") else {
+            guard let candidate = RuntimePathPolicy.containedURL(path, in: destination) else {
                 throw ExtractError.unsafePath(path)
             }
-            return URL(fileURLWithPath: resolved)
+            return candidate
         }
 
         /// Symlink targets may point anywhere unless checked, and a following
@@ -517,12 +526,9 @@ enum RuntimeTarGzExtractor {
         /// targets whose normalised form stays under the extraction root.
         private func isContainedLinkTarget(_ target: String, at parent: URL) -> Bool {
             guard !target.hasPrefix("/"), !target.contains("\0") else { return false }
-            let resolvedParent = parent.standardizedFileURL
-            let candidate = resolvedParent
-                .appendingPathComponent(target)
-                .standardizedFileURL
-                .path
-            let root = destination.standardizedFileURL.path
+            let candidate = parent.appendingPathComponent(target)
+                .standardizedFileURL.resolvingSymlinksInPath().path
+            let root = destination.standardizedFileURL.resolvingSymlinksInPath().path
             return candidate == root || candidate.hasPrefix(root + "/")
         }
 

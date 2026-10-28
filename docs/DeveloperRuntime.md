@@ -1,5 +1,10 @@
 # Developer Runtime（开发运行时安装器）
 
+> **当前行为与验收边界以 [RuntimeParity.md](RuntimeParity.md) 为准。**
+> 下方按历史批次保留实现说明；其中旧 Codex 下载页、外部 MT 目录、
+> “Helpers 尚未接入工程”等描述不再表示当前支持范围。Codex Agent 不采纳。
+> 编译/语法检查通过不等于 iOS 真机工具链与签名验收通过。
+
 本文件描述本分支新增的 **Developer Runtime** 模块：在 Minis 内部下载、校验、安装
 并管理 iOS 开发工具链运行时（Theos、OLLVM、ReverseTools 等）。它只做“工具链
 管理”，不引入 MT-Agent 的 AI / 聊天 / 账户 / Agent 层。

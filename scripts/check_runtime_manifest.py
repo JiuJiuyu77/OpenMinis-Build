@@ -28,7 +28,7 @@ import sys
 import urllib.request
 
 MANIFEST_SCHEMA = 4
-SUPPORTED_HANDLERS = {"portable-v1", "codex", "python", "theos", "reverse_tools"}
+SUPPORTED_HANDLERS = {"portable-v1", "python", "theos", "reverse_tools"}
 SUPPORTED_ARCHIVES = (".tar.gz", ".tgz", ".deb")
 # Minis consumes the toolchain runtimes only. `codex` (Codex CLI / app-server /
 # Code Mode) belongs to another app's agent stack and is intentionally ignored,
@@ -69,6 +69,16 @@ def archive_suffix(runtime: dict) -> str:
     return ""
 
 
+def is_ignored(runtime_id: str, runtime: dict) -> bool:
+    return (runtime_id.lower() == "codex" or runtime.get("handler") in IGNORED_HANDLERS
+            or any(str(c).startswith("codex.") for c in runtime.get("provides", [])))
+
+
+def safe_relative(value) -> bool:
+    return (isinstance(value, str) and bool(value) and not value.startswith("/")
+            and ".." not in value.split("/") and "\x00" not in value)
+
+
 def check_runtime(runtime_id: str, runtime: dict, handlers_seen: set) -> None:
     where = f"runtimes.{runtime_id}"
     for key in ("display_name", "version", "archive_url", "handler"):
@@ -77,7 +87,7 @@ def check_runtime(runtime_id: str, runtime: dict, handlers_seen: set) -> None:
 
     handler = runtime.get("handler")
     handlers_seen.add(handler)
-    if handler in IGNORED_HANDLERS:
+    if is_ignored(runtime_id, runtime):
         # Deliberately not installed by Minis; nothing to validate beyond the
         # shape checks below.
         return
@@ -114,12 +124,17 @@ def check_runtime(runtime_id: str, runtime: dict, handlers_seen: set) -> None:
     if not required:
         error(f"{where}.install.required_paths: expected a non-empty list")
     for entry in required:
-        if os.path.isabs(entry) or ".." in entry.split("/"):
+        if not safe_relative(entry):
             error(f"{where}.install.required_paths: must be a relative path inside the tree: {entry}")
 
     for entry in (install.get("path_entries") or []) + (install.get("persistent_path_entries") or []):
-        if os.path.isabs(entry):
-            error(f"{where}.install: PATH entries must be relative: {entry}")
+        if not safe_relative(entry):
+            error(f"{where}.install: PATH entries must stay inside their root: {entry}")
+
+    for key in ("sign_paths", "sign_paths_without_entitlements"):
+        for entry in install.get(key) or []:
+            if not safe_relative(entry):
+                error(f"{where}.install.{key}: unsafe signing target: {entry}")
 
     probe = install.get("probe")
     if not probe:
@@ -145,9 +160,11 @@ def check_runtime(runtime_id: str, runtime: dict, handlers_seen: set) -> None:
 
 
 def main(argv=None) -> int:
+    errors.clear()
+    warnings.clear()
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--manifest",
-                        default="https://raw.githubusercontent.com/JiuJiuyu77/CodexApp-Runtime/main/Runtime/runtime-manifest.json")
+                        default="https://raw.githubusercontent.com/JiuJiuyu77/MinisApp-Runtime/main/Runtime/runtime-manifest.json")
     parser.add_argument("--required-capability", action="append", default=None,
                         help="capability the app depends on (repeatable)")
     parser.add_argument("--json", action="store_true")
@@ -176,6 +193,8 @@ def main(argv=None) -> int:
             error(f"runtimes.{runtime_id}: expected an object")
             continue
         check_runtime(runtime_id, runtime, handlers_seen)
+        if is_ignored(runtime_id, runtime):
+            continue
         for capability in runtime.get("provides") or []:
             provided.setdefault(capability, []).append(runtime_id)
 

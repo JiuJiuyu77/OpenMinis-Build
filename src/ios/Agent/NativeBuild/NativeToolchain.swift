@@ -6,9 +6,8 @@
 //  本文件走另一条路：直接 posix_spawn 真正的 iOS Mach-O 工具链
 //  （MT 运行时里的 Theos：clang / ld64 / dpkg-deb / ldid / bash）。
 //
-//  前提：App 必须带 platform-application / no-sandbox 权限
-//  （TrollStore 或越狱安装）。没有权限时 isAvailable 返回 false，
-//  上层会回退到 iSH，功能不回归。
+//  原生执行依赖安装权限与有效签名；isAvailable 仅判断文件布局。
+//  真实执行能力由 NativeRuntimeHealthMonitor 探测，上层保留 iSH 回退。
 //
 
 import Foundation
@@ -20,9 +19,58 @@ struct NativeToolchain {
     private static let cacheLock = NSLock()
     private static var cachedTheos: URL?? = nil
     private static var cachedShell: String?? = nil
+    private static var cachedRuntimeState: String?
+    private static var cacheGeneration: UInt64 = 0
+
+    /// Atomic install swaps/record updates must invalidate negative discoveries too.
+    /// Read only our own runtime metadata; never enumerate another app's container.
+    private static var runtimeState: String {
+        var urls = [DeveloperRuntimePaths.installedRoot, DeveloperRuntimePaths.recordsURL,
+                    DeveloperRuntimePaths.root.appendingPathComponent("manifest.json"),
+                    Bundle.main.bundleURL.appendingPathComponent("NativeToolchain")]
+        if let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            urls.append(support.appendingPathComponent("NativeToolchain"))
+        }
+        if let manual = manualRootPath {
+            let root = URL(fileURLWithPath: manual)
+            urls.append(contentsOf: [root, root.appendingPathComponent("makefiles/common.mk")])
+        }
+        return (urls.map { url in
+            let attrs = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
+            let stamp = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+            return "\(url.path):\(stamp):\(attrs[.systemFileNumber] ?? 0):\(attrs[.size] ?? 0)"
+        } + [manualRootPath ?? ""]).joined(separator: "|")
+    }
+
+    private static func refreshCachesIfNeeded() {
+        let state = runtimeState
+        cacheLock.lock()
+        let changed = cachedRuntimeState != state
+        if changed {
+            cachedRuntimeState = state
+            cachedTheos = nil
+            cachedShell = nil
+            cacheGeneration &+= 1
+        }
+        cacheLock.unlock()
+        if changed {
+            toolLock.lock()
+            toolCache.removeAll()
+            toolLock.unlock()
+        }
+    }
+
+    /// Health results are valid only for the discovery generation they tested.
+    var generation: UInt64 {
+        Self.refreshCachesIfNeeded()
+        Self.cacheLock.lock()
+        defer { Self.cacheLock.unlock() }
+        return Self.cacheGeneration
+    }
 
     /// 工具链根目录（含 makefiles/common.mk 的那一层）。
     var theosRoot: URL? {
+        Self.refreshCachesIfNeeded()
         Self.cacheLock.lock()
         defer { Self.cacheLock.unlock() }
         if let cached = Self.cachedTheos { return cached }
@@ -34,6 +82,7 @@ struct NativeToolchain {
     /// 实际用来执行脚本的 shell。必须是 App 自带或运行时自带的 bash/sh ——
     /// 原厂 iOS 的 /bin/sh 行为受限，不能依赖。
     var shellPath: String? {
+        Self.refreshCachesIfNeeded()
         Self.cacheLock.lock()
         defer { Self.cacheLock.unlock() }
         if let cached = Self.cachedShell { return cached }
@@ -42,8 +91,8 @@ struct NativeToolchain {
         return found
     }
 
-    /// 真正的「可用」：找到 Theos 根 + 能执行 shell + 真的能找到 make。
-    /// 只判断前两项会把「下载了一半的运行时目录」也算成已安装。
+    /// 文件布局可用：Theos + shell + make 均存在；不代表它们能成功启动。
+    /// 实际执行能力由 NativeRuntimeHealthMonitor 的 shell + make 探针确认。
     var isAvailable: Bool {
         theosRoot != nil && shellPath != nil && findTool("make") != nil
     }
@@ -53,13 +102,16 @@ struct NativeToolchain {
         Self.cacheLock.lock()
         Self.cachedTheos = nil
         Self.cachedShell = nil
+        Self.cachedRuntimeState = nil
+        Self.cacheGeneration &+= 1
         Self.cacheLock.unlock()
         Self.toolLock.lock()
         Self.toolCache.removeAll()
         Self.toolLock.unlock()
+        Self.overlayLock.lock()
+        Self.overlayCache = nil
+        Self.overlayLock.unlock()
     }
-
-    var rootPath: String { theosRoot?.path ?? "" }
 
     // MARK: - 诊断（工具链识别失败时手动修复用）
 
@@ -115,7 +167,7 @@ struct NativeToolchain {
                            ok: shell != nil))
 
         if let root = theosRoot {
-            let runtimeRoot = root.deletingLastPathComponent()
+            let runtimeRoot = Self.runtimeRoot(forTheos: root)
             let sdk = findSDK()
             lines.append(.init(title: AppLocalized("SDK"),
                                detail: sdk ?? AppLocalized("No .sdk directory under the Theos root"),
@@ -193,13 +245,79 @@ struct NativeToolchain {
             let runtimeDirs = children.filter {
                 (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
             }
-            roots.append(contentsOf: runtimeDirs)
+            roots.append(contentsOf: runtimeDirs.filter { $0.lastPathComponent != "codex" }
+                .sorted { $0.lastPathComponent < $1.lastPathComponent })
         }
         roots.append(Bundle.main.bundleURL.appendingPathComponent("NativeToolchain", isDirectory: true))
         if let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
             roots.append(support.appendingPathComponent("NativeToolchain", isDirectory: true))
         }
         return roots.filter { seen.insert($0.standardizedFileURL.path).inserted }
+    }
+
+    /// Installed tools must work without a Theos checkout. Consume the same
+    /// manifest overlay as the installer (including its environment/path contract).
+    /// This synchronous snapshot is safe for native/offload background callers;
+    /// it never crosses DeveloperRuntimeManager's MainActor boundary.
+    private static let overlayLock = NSLock()
+    private static var overlayCache: (state: String, result: RuntimeEnvironmentOverlay.Result)?
+
+    private static func installedEnvironment() -> RuntimeEnvironmentOverlay.Result {
+        let state = runtimeState
+        overlayLock.lock()
+        defer { overlayLock.unlock() }
+        if let cached = overlayCache, cached.state == state { return cached.result }
+        let fm = FileManager.default
+        let manifestURL = DeveloperRuntimePaths.root.appendingPathComponent("manifest.json")
+        let manifest = (try? Data(contentsOf: manifestURL)).flatMap {
+            try? JSONDecoder().decode(RuntimeManifest.self, from: $0)
+        }
+        let roots = ((try? fm.contentsOfDirectory(at: DeveloperRuntimePaths.installedRoot,
+                                                  includingPropertiesForKeys: [.isDirectoryKey],
+                                                  options: [.skipsHiddenFiles])) ?? [])
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        var exports: [String: String] = [:]
+        var paths: [String] = []
+        for root in roots {
+            let id = root.lastPathComponent
+            guard id != "codex",
+                  (try? root.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
+            if var descriptor = manifest?.runtimes[id] {
+                guard descriptor.handler != "codex" else { continue }
+                descriptor.id = id
+                let overlay = RuntimeEnvironmentOverlay.build(descriptor: descriptor, root: root)
+                exports.merge(overlay.exports) { current, _ in current }
+                paths.append(contentsOf: overlay.pathEntries)
+            } else {
+                // Offline/legacy installation without a cached central manifest.
+                exports["CA_TOOL_\(RuntimeEnvironmentOverlay.envelopeKey(id))_RUNTIME_ROOT"] = root.path
+                for rel in ["usr/bin", "bin"] {
+                    let path = root.appendingPathComponent(rel).path
+                    if fm.fileExists(atPath: path) { paths.append(path) }
+                }
+            }
+        }
+        let result = RuntimeEnvironmentOverlay.Result(exports: exports, pathEntries: uniquePaths(paths))
+        overlayCache = (state, result)
+        return result
+    }
+
+    private static func uniquePaths(_ paths: [String]) -> [String] {
+        var seen = Set<String>()
+        return paths.filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
+    /// Both archive layouts are supported: <runtime>/theos and a flat checkout.
+    static func runtimeRoot(forTheos root: URL) -> URL {
+        let parent = root.deletingLastPathComponent()
+        if root.lastPathComponent == "theos" {
+            let fm = FileManager.default
+            let hasRuntimeLayout = ["usr", "bin", "manifest.json", ".runtime-record.json"].contains {
+                fm.fileExists(atPath: parent.appendingPathComponent($0).path)
+            }
+            if hasRuntimeLayout { return parent }
+        }
+        return root
     }
 
     static func looksLikeTheos(_ url: URL) -> Bool {
@@ -254,73 +372,37 @@ struct NativeToolchain {
     static func allShellCandidates() -> [String] {
         var candidates: [String] = []
         if let theos = discoverTheos() {
-            let runtimeRoot = theos.deletingLastPathComponent()
-            for rel in ["usr/bin/zsh", "usr/bin/bash", "usr/bin/dash", "usr/bin/sh",
-                        "bin/zsh", "bin/bash", "bin/sh"] {
-                candidates.append(runtimeRoot.appendingPathComponent(rel).path)
-            }
+            candidates.append(contentsOf: shellPaths(in: runtimeRoot(forTheos: theos)))
+            candidates.append(contentsOf: shellPaths(in: theos))
         }
+        for root in candidateRoots() {
+            candidates.append(contentsOf: shellPaths(in: root))
+        }
+        for rel in ["Helpers/bash.real", "Helpers/bash", "Helpers/sh"] {
+            candidates.append(Bundle.main.bundleURL.appendingPathComponent(rel).path)
+        }
+        // Keep system/jailbreak fallbacks: they may work when runtime zsh's dyld fails.
         candidates.append(contentsOf: [
-            "/var/jb/usr/bin/bash",
-            "/var/jb/usr/bin/zsh",
-            "/var/jb/usr/bin/dash",
-            "/var/jb/bin/sh",
-            "/var/jb/usr/bin/sh",
-            "/usr/bin/bash",
-            "/usr/bin/zsh",
-            "/bin/bash",
-            "/bin/sh",
+            "/var/jb/usr/bin/bash", "/var/jb/usr/bin/zsh", "/var/jb/usr/bin/dash",
+            "/var/jb/bin/sh", "/var/jb/usr/bin/sh", "/usr/bin/bash", "/usr/bin/zsh",
+            "/bin/bash", "/bin/sh",
         ])
-        let fm = FileManager.default
-        var seen = Set<String>()
-        // 截断/非 Mach-O 的 shell 先排除：它只会让 posix_spawn 返回 EBADEXEC，
-        // 然后在错误信息里伪装成「所有 shell 都启动不了」。
-        let healthy = candidates.filter {
-            fm.isExecutableFile(atPath: $0)
-                && runtimeBinaryDamage($0) == nil
-                && seen.insert($0).inserted
+        let executable = uniquePaths(candidates).filter { FileManager.default.isExecutableFile(atPath: $0) }
+        let healthy = executable.filter {
+            runtimeBinaryDamage(URL(fileURLWithPath: $0).resolvingSymlinksInPath().path) == nil
         }
-        if !healthy.isEmpty { return healthy }
-        // 一个都不健康时不要把列表清空。返回空数组会让最终报错变成
-        // 「Shells tried:」后面什么都没有 —— 用户分不清是「没装运行时」还是
-        // 「装了但每一个都坏了」。原样返回，让每条候选各自带上损坏原因。
-        var fallbackSeen = Set<String>()
-        return candidates.filter {
-            fm.isExecutableFile(atPath: $0) && fallbackSeen.insert($0).inserted
-        }
+        // Keep damaged paths in diagnostics only if no healthy shell exists.
+        return healthy.isEmpty ? executable : healthy
+    }
+
+    private static func shellPaths(in root: URL) -> [String] {
+        ["usr/bin/zsh", "usr/bin/bash", "usr/bin/dash", "usr/bin/sh",
+         "bin/zsh", "bin/bash", "bin/dash", "bin/sh", "Helpers/bash.real"]
+            .map { root.appendingPathComponent($0).path }
     }
 
     private static func discoverShell() -> String? {
-        let fm = FileManager.default
-        var candidates: [URL] = []
-        candidates.append(Bundle.main.bundleURL.appendingPathComponent("NativeToolchain/bin/bash"))
-        candidates.append(Bundle.main.bundleURL.appendingPathComponent("Helpers/bash.real"))
-        if let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            candidates.append(support.appendingPathComponent("NativeToolchain/bin/bash"))
-        }
-        // 运行时里自带的 shell 也可用。MT 的 Theos 运行时只带 zsh（没有 bash），
-        // 之前只查 bash 会导致「工具链已装好但 isAvailable=false」。
-        if let theos = discoverTheos() {
-            let runtimeRoot = theos.deletingLastPathComponent()
-            for rel in ["usr/bin/zsh", "usr/bin/bash", "usr/bin/sh", "bin/zsh", "bin/bash", "bin/sh"] {
-                candidates.append(runtimeRoot.appendingPathComponent(rel))
-                candidates.append(theos.appendingPathComponent(rel))
-            }
-            candidates.append(runtimeRoot.appendingPathComponent("Helpers/bash.real"))
-        }
-        // 手动指定根目录时也试一遍它下面的 shell。
-        if let manual = manualRootPath {
-            let root = URL(fileURLWithPath: manual, isDirectory: true)
-            for rel in ["usr/bin/zsh", "usr/bin/bash", "usr/bin/sh", "bin/zsh", "bin/bash", "bin/sh"] {
-                candidates.append(root.appendingPathComponent(rel))
-            }
-        }
-        candidates.append(URL(fileURLWithPath: "/var/jb/usr/bin/bash"))
-        candidates.append(URL(fileURLWithPath: "/var/jb/usr/bin/zsh"))
-        candidates.append(URL(fileURLWithPath: "/bin/sh"))
-        // 注意：这里故意不排除损坏的 shell。发现阶段要能指出「就是它坏了」，
-        // 真正 spawn 时的候选列表（allShellCandidates）才过滤损坏项。
-        return candidates.first { fm.isExecutableFile(atPath: $0.path) }?.path
+        allShellCandidates().first
     }
 
     // MARK: - 兼容层（补齐 clang / ld 这类“只有带版本号的可执行文件”的名字）
@@ -329,7 +411,6 @@ struct NativeToolchain {
     /// 走 `CC=clang`、`LD=ld`，缺了就会在链接/编译时报“找不到命令”。这里在
     /// App 容器里建一个只含符号链接的目录，并把它放在 PATH 最前面。
     private static let shimLock = NSLock()
-    private static var shimDirCache: String?
 
     static var shimDirectory: URL? {
         guard let support = FileManager.default.urls(for: .applicationSupportDirectory,
@@ -360,7 +441,6 @@ struct NativeToolchain {
         let fm = FileManager.default
         Self.shimLock.lock()
         defer { Self.shimLock.unlock() }
-        if let cached = shimDirCache, fm.fileExists(atPath: cached) { return cached }
         do {
             try fm.createDirectory(at: shim, withIntermediateDirectories: true)
         } catch {
@@ -368,7 +448,6 @@ struct NativeToolchain {
         }
         for (name, aliases) in shimNames {
             let target = shim.appendingPathComponent(name)
-            if fm.isExecutableFile(atPath: target.path) { continue }
             var resolved: String?
             for dir in sourceDirs {
                 for candidate in [name] + aliases {
@@ -377,11 +456,13 @@ struct NativeToolchain {
                 }
                 if resolved != nil { break }
             }
-            guard let resolved else { continue }
-            try? fm.removeItem(at: target)
+            let existing = try? fm.destinationOfSymbolicLink(atPath: target.path)
+            // Only manage our symlinks, never delete an unexpected regular file.
+            if existing == resolved, resolved != nil { continue }
+            if existing != nil { try? fm.removeItem(at: target) }
+            guard let resolved, !fm.fileExists(atPath: target.path) else { continue }
             try? fm.createSymbolicLink(atPath: target.path, withDestinationPath: resolved)
         }
-        shimDirCache = shim.path
         return shim.path
     }
 
@@ -391,16 +472,6 @@ struct NativeToolchain {
     func searchPaths() -> [String] {
         var paths: [String] = []
         let fm = FileManager.default
-        // 先把运行时的 bin 目录找出来，交给 shim 补 `clang`/`ld` 这类裸名字。
-        if let root = theosRoot {
-            let runtimeRoot = root.deletingLastPathComponent()
-            let binDirs = ["usr/bin", "bin", "usr/local/bin", "toolchain/bin"]
-                .map { runtimeRoot.appendingPathComponent($0).path }
-                .filter { fm.fileExists(atPath: $0) }
-            if let shim = Self.prepareShims(sourceDirs: binDirs) {
-                paths.append(shim)
-            }
-        }
         if let root = theosRoot {
             for rel in ["bin", "toolchain/bin", "toolchain/usr/bin", "toolchain/linux/iphone/bin",
                         "toolchain/iphone/bin", "libexec/theos/bin"] {
@@ -410,19 +481,24 @@ struct NativeToolchain {
             // Theos checkout 位于 `<runtime>/theos`，而 clang / ld64 / ldid /
             // dpkg-deb 在 `<runtime>/usr/bin`。之前漏掉这一层，导致 make 能起
             // 来却找不到编译器。
-            let runtimeRoot = root.deletingLastPathComponent()
-            for rel in ["usr/bin", "bin", "usr/local/bin"] {
+            let runtimeRoot = Self.runtimeRoot(forTheos: root)
+            for rel in ["usr/bin", "bin", "usr/local/bin", "usr/lib/llvm-16/bin"] {
                 let p = runtimeRoot.appendingPathComponent(rel).path
                 if fm.fileExists(atPath: p) { paths.append(p) }
             }
         }
+        paths.append(contentsOf: Self.installedEnvironment().pathEntries)
+        paths = Self.uniquePaths(paths)
+        // OLLVM remains opt-in: Theos' ordinary compiler precedes other runtimes.
+        if let shim = Self.prepareShims(sourceDirs: paths) { paths.insert(shim, at: 0) }
         // App 自带的 coreutils 替身（tar/cp/mv/mkdir… 都是同一个多合一二进制）
         for rel in ["NativeToolchain/bin", "Helpers", "Helpers/TheosCompat", "Helpers/TheosCoreCompat"] {
             let p = Bundle.main.bundleURL.appendingPathComponent(rel).path
             if fm.fileExists(atPath: p) { paths.append(p) }
         }
-        paths.append(contentsOf: ["/usr/bin", "/bin", "/usr/sbin", "/sbin", "/usr/local/bin"])
-        return paths
+        paths.append(contentsOf: ["/var/jb/usr/bin", "/var/jb/bin", "/usr/bin", "/bin",
+                                  "/usr/sbin", "/sbin", "/usr/local/bin"])
+        return Self.uniquePaths(paths)
     }
 
     private static let toolLock = NSLock()
@@ -430,8 +506,13 @@ struct NativeToolchain {
 
     /// 运行时内查找可执行文件（供 CA_THEOS_* 使用）。
     func findTool(_ name: String) -> String? {
+        Self.refreshCachesIfNeeded()
         Self.toolLock.lock()
-        if let hit = Self.toolCache[name] { Self.toolLock.unlock(); return hit }
+        if let hit = Self.toolCache[name], FileManager.default.isExecutableFile(atPath: hit) {
+            Self.toolLock.unlock()
+            return hit
+        }
+        Self.toolCache[name] = nil
         Self.toolLock.unlock()
         let found = searchTool(name)
         if let found {
@@ -496,25 +577,54 @@ struct NativeToolchain {
         return nil
     }
 
-    /// 构造给子进程的环境。与 MT 的内嵌 Theos 约定保持一致，
-    /// makefile 会走 theos-helper 的 forkless 分支。
+    /// 构造原生子进程环境；复用清单 overlay，不启用 MT 私有 forkless helper。
     func environment(projectPath: String? = nil) -> [String: String] {
         var env = ProcessInfo.processInfo.environment
-        env["PATH"] = searchPaths().joined(separator: ":")
+        let overlay = Self.installedEnvironment()
+        env.merge(overlay.exports) { _, installed in installed }
+        let inheritedPaths = (env["PATH"] ?? "").split(separator: ":").map(String.init)
+        let paths = Self.uniquePaths(searchPaths() + inheritedPaths)
+        env["PATH"] = paths.joined(separator: ":")
         env["HOME"] = NSHomeDirectory()
         env["TMPDIR"] = NSTemporaryDirectory()
         env["LANG"] = "en_US.UTF-8"
         env["LC_ALL"] = "en_US.UTF-8"
         env["TERM"] = "dumb"
+        if let certificate = Bundle.main.url(forResource: "cacert", withExtension: "pem") {
+            for key in ["SSL_CERT_FILE", "CURL_CA_BUNDLE", "GIT_SSL_CAINFO", "NODE_EXTRA_CA_CERTS"]
+                where env[key]?.isEmpty != false {
+                env[key] = certificate.path
+            }
+        }
 
         if let root = theosRoot {
             env["THEOS"] = root.path
-            env["CA_THEOS_RUNTIME"] = root.path
-            env["CA_THEOS_PATH"] = root.path
-            env["CA_THEOS_EMBEDDED"] = "1"
-            if let sdk = findSDK() { env["SYSROOT"] = sdk; env["CA_THEOS_SDKROOT"] = sdk }
+            env["CA_THEOS_RUNTIME"] = Self.runtimeRoot(forTheos: root).path
+            env["CA_THEOS_PATH"] = paths.joined(separator: ":")
+            // We ship unpatched upstream makefiles and no private packaging helper.
+            // Native make/package must use ordinary external tools, not MT's forkless ABI.
+            env["CA_THEOS_EMBEDDED"] = "0"
+            env["CA_THEOS_HELPER"] = nil
+            env["CA_THEOS_PACKAGE_MODE"] = nil
+            if let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+                .appendingPathComponent("NativeToolchain/ModuleCache", isDirectory: true) {
+                if (try? FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)) != nil {
+                    env["CA_THEOS_MODULE_CACHE"] = cache.path
+                    env["CLANG_MODULE_CACHE_PATH"] = cache.path
+                }
+            }
+            if let sdk = findSDK() {
+                env["SYSROOT"] = sdk
+                env["SDKROOT"] = sdk
+                env["CA_THEOS_SDKROOT"] = sdk
+                env["THEOS_SDKROOT"] = URL(fileURLWithPath: sdk).deletingLastPathComponent().path
+            }
         }
-        if let shell = shellPath { env["CA_THEOS_BASH"] = shell }
+        if let shell = shellPath {
+            env["SHELL"] = shell
+            env["CONFIG_SHELL"] = shell
+            env["CA_THEOS_BASH"] = shell
+        }
 
         // The runtime's zsh links `@rpath/libiosexec.1.dylib`, `@rpath/libpcre.1.dylib`
         // and `@rpath/libncursesw.6.dylib`, all shipped in `<runtime>/usr/lib`.
@@ -524,25 +634,31 @@ struct NativeToolchain {
         // child and covers that case without patching the binary.
         var dylibPaths: [String] = []
         if let root = theosRoot {
-            let runtimeRoot = root.deletingLastPathComponent()
+            let runtimeRoot = Self.runtimeRoot(forTheos: root)
             for rel in ["usr/lib", "lib", "usr/local/lib"] {
                 let p = runtimeRoot.appendingPathComponent(rel).path
                 if FileManager.default.fileExists(atPath: p) { dylibPaths.append(p) }
             }
         }
-        dylibPaths.append(contentsOf: ["/var/jb/usr/lib", "/usr/lib"])
-        env["DYLD_FALLBACK_LIBRARY_PATH"] = dylibPaths.joined(separator: ":")
-
-        let helperCandidates = [Bundle.main.bundleURL.appendingPathComponent("Helpers/theos-helper"),
-                                Bundle.main.bundleURL.appendingPathComponent("NativeToolchain/bin/theos-helper")]
-        for h in helperCandidates where FileManager.default.isExecutableFile(atPath: h.path) {
-            env["CA_THEOS_HELPER"] = h.path
-            break
+        for (key, value) in overlay.exports where key.hasPrefix("CA_TOOL_") && key.hasSuffix("_RUNTIME_ROOT") {
+            let root = URL(fileURLWithPath: value)
+            for rel in ["usr/lib", "lib", "usr/local/lib"] {
+                let path = root.appendingPathComponent(rel).path
+                if FileManager.default.fileExists(atPath: path) { dylibPaths.append(path) }
+            }
         }
+        dylibPaths.append(contentsOf: (env["DYLD_FALLBACK_LIBRARY_PATH"] ?? "").split(separator: ":").map(String.init))
+        dylibPaths.append(contentsOf: ["/var/jb/usr/lib", "/usr/lib"])
+        env["DYLD_FALLBACK_LIBRARY_PATH"] = Self.uniquePaths(dylibPaths).joined(separator: ":")
+
         let tools: [String: String] = ["CA_THEOS_MAKE": "make", "CA_THEOS_CLANG": "clang",
                                        "CA_THEOS_CLANGXX": "clang++", "CA_THEOS_DPKG_DEB": "dpkg-deb",
                                        "CA_THEOS_TAR": "tar", "CA_THEOS_GZIP": "gzip",
-                                       "CA_THEOS_XZ": "xz", "CA_THEOS_PERL": "perl"]
+                                       "CA_THEOS_XZ": "xz", "CA_THEOS_PERL": "perl",
+                                       "CA_THEOS_ZSH": "zsh",
+                                       "CA_THEOS_LINKER": "ld64", "CA_THEOS_LDID": "ldid",
+                                       "CA_THEOS_AR": "ar", "CA_THEOS_STRIP": "strip",
+                                       "CA_THEOS_LIPO": "lipo", "CA_THEOS_NM": "nm-classic"]
         for (key, tool) in tools {
             if let p = findTool(tool) { env[key] = p }
         }
@@ -567,17 +683,18 @@ struct NativeToolchain {
                                                        includingPropertiesForKeys: nil,
                                                        options: [.skipsHiddenFiles]) {
             // 名字里含 ollvm 的优先，其余目录也会被扫到（提供就是 OLLVM）。
-            roots.append(contentsOf: children.sorted {
-                ($0.lastPathComponent.contains("ollvm") ? 0 : 1) <
-                ($1.lastPathComponent.contains("ollvm") ? 0 : 1)
+            roots.append(contentsOf: children.filter { $0.lastPathComponent != "codex" }.sorted {
+                let lhs = $0.lastPathComponent.lowercased().contains("ollvm")
+                let rhs = $1.lastPathComponent.lowercased().contains("ollvm")
+                return lhs != rhs ? lhs : $0.lastPathComponent < $1.lastPathComponent
             })
         }
         // 运行时自带的编译器也算候选（有些包把 OLLVM 直接换成了默认 clang）。
         if let root = theosRoot {
-            roots.append(root.deletingLastPathComponent())
+            roots.append(Self.runtimeRoot(forTheos: root))
         }
         for root in roots {
-            for binRel in ["usr/bin", "bin"] {
+            for binRel in ["usr/bin", "bin", "toolchain/bin", "usr/lib/llvm-16/bin"] {
                 let bin = root.appendingPathComponent(binRel, isDirectory: true)
                 guard let entries = try? fm.contentsOfDirectory(atPath: bin.path) else { continue }
                 for name in entries.sorted() where name == "clang" || name.hasPrefix("clang-") {
@@ -609,12 +726,22 @@ struct NativeToolchain {
     func findSDK() -> String? {
         let fm = FileManager.default
         guard let root = theosRoot else { return nil }
-        for rel in ["sdks", "sdk", "theos/sdks", "toolchain/sdks"] {
-            let dir = root.appendingPathComponent(rel, isDirectory: true)
-            let names = (try? fm.contentsOfDirectory(atPath: dir.path)) ?? []
-            if let sdk = names.first(where: { $0.hasSuffix(".sdk") }) {
-                return dir.appendingPathComponent(sdk).path
+        var dirs: [URL] = []
+        for base in [root, Self.runtimeRoot(forTheos: root)] {
+            for rel in ["sdks", "sdk", "toolchain/sdks"] {
+                dirs.append(base.appendingPathComponent(rel, isDirectory: true))
             }
+        }
+        for dir in dirs {
+            let names = ((try? fm.contentsOfDirectory(atPath: dir.path)) ?? [])
+                .filter { name in
+                    var isDirectory: ObjCBool = false
+                    return name.hasSuffix(".sdk")
+                        && fm.fileExists(atPath: dir.appendingPathComponent(name).path, isDirectory: &isDirectory)
+                        && isDirectory.boolValue
+                }
+                .sorted { $0.compare($1, options: .numeric) == .orderedDescending }
+            if let sdk = names.first { return dir.appendingPathComponent(sdk).path }
         }
         return nil
     }

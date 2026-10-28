@@ -68,6 +68,7 @@ final class ToolExecutorPreference: ObservableObject {
         didSet {
             defaults.set(mode.rawValue, forKey: Key.mode)
             NativeToolchain.shared.resetCache()
+            NativeRuntimeHealthMonitor.shared.invalidate()
         }
     }
 
@@ -77,6 +78,7 @@ final class ToolExecutorPreference: ObservableObject {
         didSet {
             defaults.set(sandboxMode, forKey: Key.sandboxMode)
             NativeToolchain.shared.resetCache()
+            NativeRuntimeHealthMonitor.shared.invalidate()
         }
     }
 
@@ -90,7 +92,7 @@ final class ToolExecutorPreference: ObservableObject {
         self.sandboxMode = defaults.bool(forKey: Key.sandboxMode)
     }
 
-    /// 实际应当使用的执行器。三个开关收敛成一个决定，调用方不再各自重复。
+    /// 实际应当使用的执行器。两个开关收敛成一个决定，调用方不再各自重复。
     ///
     /// 规则只有两条：
     ///   1. 「沙箱」永远走 iSH；
@@ -110,7 +112,7 @@ final class ToolExecutorPreference: ObservableObject {
         resolvedExecutor != .sandbox
     }
 
-    /// 一次性把三个开关收敛成“这次命令该怎么跑”，供非主线程的调用方
+    /// 一次性把两个开关收敛成“这次命令该怎么跑”，供非主线程的调用方
     /// 在主线程上取值后带走，避免跨界反复读 `@Published` 属性。
     struct ExecutionDecision: Sendable {
         let executor: ToolExecutorMode

@@ -15,5 +15,21 @@ Nothing here is required for the app to build or launch: without these files the
 runtime layer reports `Ad-hoc signed only` / `no usable shell` and stays honest
 about it.
 
+The Xcode `Stage App Helpers` phase is already wired. For local use with a
+user-supplied reference archive:
+
+```sh
+python3 scripts/import_runtime_helpers.py /path/to/reference.tipa
+```
+
+The importer validates arm64 Mach-O headers/signatures and records SHA-256
+provenance. It imports **only** `bash.real`, the standalone `codex-sign`, CA
+certificates and notices. It never imports the Codex agent/app-server or the
+MT-specific `ca-filetool` authorisation hooks. Use runtime-provided coreutils.
+The reference Lite archive does not include the `ThirdPartySources` promised
+by its notices: obtain/provide corresponding source and build scripts before
+redistributing imported GPL executables. Merely copying a licence text is not
+a substitute. Imported executables are intentionally not committed here.
+
 Keep redistributable licenses in mind — check `THIRD_PARTY_LICENSES.md` when you
 add a binary.

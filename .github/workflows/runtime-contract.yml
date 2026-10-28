@@ -23,6 +23,9 @@ on:
       - "src/ios/Agent/NativeBuild/**"
       - "src/ios/Views/Settings/DeveloperRuntimeSettingsView.swift"
       - "scripts/stage_app_helpers.sh"
+      - "scripts/import_runtime_helpers.py"
+      - "scripts/tests/*runtime*"
+      - "src/ios/NativeOffloads/ConfigOffload.m"
       - "src/ios/Minis.xcodeproj/project.pbxproj"
       - "scripts/check_xcode_project_files.py"
       - ".github/workflows/runtime-contract.yml"
@@ -33,6 +36,9 @@ on:
       - "src/ios/Agent/NativeBuild/**"
       - "src/ios/Views/Settings/DeveloperRuntimeSettingsView.swift"
       - "scripts/stage_app_helpers.sh"
+      - "scripts/import_runtime_helpers.py"
+      - "scripts/tests/*runtime*"
+      - "src/ios/NativeOffloads/ConfigOffload.m"
       - ".github/workflows/runtime-contract.yml"
 
 permissions:
@@ -52,6 +58,9 @@ jobs:
       - name: Python version
         run: python3 -V
 
+      - name: Runtime regression contracts
+        run: python3 -m unittest discover -s scripts/tests -p 'test_runtime_*.py' -v
+
       - name: "Check the live manifest (3 attempts, raw.githubusercontent is flaky)"
         run: |
           set -euo pipefail
@@ -69,7 +78,7 @@ jobs:
 
       - name: Installer handlers the app actually implements
         run: |
-          echo "Supported handlers: portable-v1, codex, python, theos, reverse_tools"
+          echo "Supported handlers: portable-v1, python, theos, reverse_tools (Codex excluded)"
           echo "Supported archives: .tar.gz, .tgz, .deb (data.tar.gz / data.tar.zst)"
           grep -n "SUPPORTED_HANDLERS\|SUPPORTED_ARCHIVES" scripts/check_runtime_manifest.py | head -5
 
@@ -96,6 +105,8 @@ jobs:
                         src/ios/Agent/NativeBuild/NativeBuildService.swift \
                         src/ios/Agent/NativeBuild/RuntimeRepair.swift \
                         src/ios/Agent/NativeBuild/NativeCommandRunner.swift \
+                        src/ios/Agent/NativeBuild/RuntimeOffloadBridge.swift \
+                        src/ios/Agent/NativeBuild/RuntimeEnvironment.swift \
                         src/ios/Agent/NativeBuild/ToolExecutorPreference.swift \
                         src/ios/Agent/NativeBuild/NativeToolchain.swift
           swiftc -parse src/ios/Views/Settings/DeveloperRuntimeSettingsView.swift \
@@ -178,3 +189,21 @@ jobs:
             *"nothing to stage"*) echo "ok: no-op path works" ;;
             *) echo "unexpected output" >&2; exit 1 ;;
           esac
+
+  native-process-smoke:
+    name: Native process runner and linked C ABI execute
+    runs-on: macos-26-intel
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile production runner and bridge with a host-only toolchain stub
+        run: |
+          set -euo pipefail
+          swiftc -swift-version 5 -parse-as-library \
+            src/ios/Agent/NativeBuild/NativeCommandRunner.swift \
+            src/ios/Agent/NativeBuild/RuntimeOffloadBridge.swift \
+            scripts/tests/runtime_process_smoke.swift -o /tmp/runtime-process-smoke
+          /tmp/runtime-process-smoke
+          # A link-time C caller must see both entry points (not just a parsed annotation).
+          nm -g /tmp/runtime-process-smoke | grep -q ' _minis_runtime_run_tool$'
+          nm -g /tmp/runtime-process-smoke | grep -q ' _minis_runtime_bridge_version$'

@@ -141,6 +141,7 @@ final class DeveloperRuntimeManager: ObservableObject {
     @Published private(set) var errors: [String: String] = [:]
 
     private var tasks: [String: Task<Void, Never>] = [:]
+    private var removingIDs = Set<String>()
 
     nonisolated static let manifestURL = RuntimeManifestLoader.defaultURL
 
@@ -161,10 +162,7 @@ final class DeveloperRuntimeManager: ObservableObject {
 
     /// 本 App 会展示与安装的运行时：清单顺序减去不采纳的 handler。
     var runtimes: [RuntimeDescriptor] {
-        (manifest?.orderedRuntimes ?? []).filter { descriptor in
-            guard let handler = descriptor.handler else { return true }
-            return !Self.unsupportedHandlers.contains(handler)
-        }
+        (manifest?.orderedRuntimes ?? []).filter { $0.isSupportedRuntime }
     }
 
     func loadManifestIfNeeded() async {
@@ -189,12 +187,15 @@ final class DeveloperRuntimeManager: ObservableObject {
     // MARK: - State
 
     func state(for descriptor: RuntimeDescriptor) -> RuntimeInstallState {
-        guard let record = records[descriptor.id],
+        guard descriptor.isSupportedRuntime, descriptor.installationIssue == nil,
+              let record = records[descriptor.id],
               FileManager.default.fileExists(
                 atPath: DeveloperRuntimePaths.installDirectory(id: descriptor.id).path) else {
             return .notInstalled
         }
-        if record.version == descriptor.version, record.revision == descriptor.revision {
+        if record.version == descriptor.version, record.revision == descriptor.revision,
+           record.archiveSHA256.lowercased() == descriptor.archiveSHA256.lowercased(),
+           record.verification?.isAcceptable != false, record.signing?.isAcceptable != false {
             return .installed(record)
         }
         return .outdated(record)
@@ -206,8 +207,13 @@ final class DeveloperRuntimeManager: ObservableObject {
     /// Capability identifiers currently backed by an installed runtime.
     var installedCapabilities: Set<String> {
         records.values.reduce(into: Set<String>()) { result, record in
-            guard FileManager.default.fileExists(
-                atPath: DeveloperRuntimePaths.installDirectory(id: record.id).path) else { return }
+            guard !RuntimeDescriptor.isAgentIdentifier(record.id),
+                  RuntimePathPolicy.isRelativePath(record.id), !record.id.contains("/"),
+                  !record.provides.contains(where: RuntimeDescriptor.isAgentIdentifier),
+                  record.verification?.isAcceptable != false, record.signing?.isAcceptable != false,
+                  descriptor(id: record.id)?.isSupportedRuntime != false,
+                  FileManager.default.fileExists(
+                    atPath: DeveloperRuntimePaths.installDirectory(id: record.id).path) else { return }
             result.formUnion(record.provides)
         }
     }
@@ -312,10 +318,9 @@ final class DeveloperRuntimeManager: ObservableObject {
 
     func install(_ descriptor: RuntimeDescriptor) {
         let id = descriptor.id
-        guard tasks[id] == nil else { return }
-        if let handler = descriptor.handler, Self.unsupportedHandlers.contains(handler) {
-            // 防御：清单即使直接塞进来（例如自定义清单地址），也不给装。
-            errors[id] = AppLocalized("This runtime belongs to another app's agent stack and is not installed by Minis.")
+        guard tasks[id] == nil, !removingIDs.contains(id) else { return }
+        if let issue = descriptor.installationIssue {
+            errors[id] = issue
             return
         }
         guard descriptor.installableArchive else {
@@ -359,16 +364,22 @@ final class DeveloperRuntimeManager: ObservableObject {
     }
 
     func remove(_ id: String) {
+        guard RuntimePathPolicy.isRelativePath(id), !id.contains("/"),
+              !removingIDs.contains(id) else { return }
         guard let task = tasks[id] else { return removeFromDisk(id) }
+        removingIDs.insert(id)
         // Let the installer roll back first: a queued continuation can still
         // move `scratch` into place after this returns, recreating the files.
         operations[id] = .cancelling
-        tasks[id] = nil
         task.cancel()
-        Task { [weak self] in
+        // Keep the id locked until both cancellation and removal finish.
+        let removal = Task { [weak self] in
             _ = await task.value
             self?.removeFromDisk(id)
+            self?.tasks[id] = nil
+            self?.removingIDs.remove(id)
         }
+        tasks[id] = removal
     }
 
     private func removeFromDisk(_ id: String) {
@@ -385,6 +396,10 @@ final class DeveloperRuntimeManager: ObservableObject {
     /// actor, and progress is published back through `Task { @MainActor }`.
     private nonisolated static func performInstall(_ descriptor: RuntimeDescriptor,
                                                    publishingTo manager: DeveloperRuntimeManager) async throws {
+        if let issue = descriptor.installationIssue {
+            throw RuntimeInstallError.installFailed(issue)
+        }
+        try Task.checkCancellation()
         try DeveloperRuntimePaths.ensureDirectories()
         guard let archiveURL = URL(string: descriptor.archiveURL) else {
             throw RuntimeInstallError.badURL(descriptor.archiveURL)
@@ -394,10 +409,13 @@ final class DeveloperRuntimeManager: ObservableObject {
 
         let ext = descriptor.archiveFormat == .deb ? "deb" : "tar.gz"
         let archive = DeveloperRuntimePaths.downloadRoot
-            .appendingPathComponent("\(id)-\(descriptor.version).\(ext)")
+            .appendingPathComponent("\(id)-\(UUID().uuidString).\(ext)")
         let scratch = DeveloperRuntimePaths.stagingRoot
             .appendingPathComponent("\(id)-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: archive) }
+        defer {
+            try? fm.removeItem(at: archive)
+            try? fm.removeItem(at: archive.appendingPathExtension("part"))
+        }
         // A failed or cancelled run must not leave a half-extracted tree in
         // staging: it is invisible in the UI but still consumes ~1GB.
         defer { try? fm.removeItem(at: scratch) }
@@ -453,26 +471,32 @@ final class DeveloperRuntimeManager: ObservableObject {
         await manager.publish(id, .extracting(fraction: 0, entries: 0))
         try fm.createDirectory(at: scratch, withIntermediateDirectories: true)
         let unpacked = descriptor.unpackedBytes
+        let extraction = Task.detached(priority: .userInitiated) {
+            try Self.unpack(archive: archive,
+                            format: descriptor.archiveFormat ?? .tarGz,
+                            into: scratch,
+                            stagingArea: DeveloperRuntimePaths.stagingRoot,
+                            unpackedBytes: unpacked,
+                            isCancelled: { Task.isCancelled },
+                            progress: { written, entries in
+                let fraction = unpacked > 0
+                    ? min(0.99, Double(written) / Double(unpacked))
+                    : 0
+                Task { @MainActor in
+                    manager.operations[id] = .extracting(fraction: fraction, entries: entries)
+                }
+            })
+        }
         do {
-            try await Task.detached(priority: .userInitiated) {
-                try Self.unpack(archive: archive,
-                                format: descriptor.archiveFormat ?? .tarGz,
-                                into: scratch,
-                                stagingArea: DeveloperRuntimePaths.stagingRoot,
-                                unpackedBytes: unpacked,
-                                isCancelled: { Task.isCancelled },
-                                progress: { written, entries in
-                    let fraction = unpacked > 0
-                        ? min(0.99, Double(written) / Double(unpacked))
-                        : 0
-                    Task { @MainActor in
-                        manager.operations[id] = .extracting(
-                            fraction: fraction, entries: entries)
-                    }
-                })
-            }.value
+            try await withTaskCancellationHandler {
+                try await extraction.value
+            } onCancel: {
+                extraction.cancel()
+            }
+            try Task.checkCancellation()
+        } catch is CancellationError {
+            throw RuntimeInstallError.cancelled
         } catch {
-            try? fm.removeItem(at: scratch)
             throw RuntimeInstallError.extractionFailed(error.localizedDescription)
         }
 
@@ -482,6 +506,14 @@ final class DeveloperRuntimeManager: ObservableObject {
         await manager.publish(id, .verifying)
         // 30 秒缓存的探测结果：沙盒/侧载环境下 probe 记 skipped，而不是判坏包。
         let hostCanRunNative = MinisHostEnvironmentDetector.cached.canRunNativeBinaries
+        // Probe binaries may be unsigned in the archive. Sign before spawning.
+        let signing = RuntimeSigner.signRuntime(descriptor: descriptor,
+                                                root: scratch,
+                                                canExecuteNative: hostCanRunNative)
+        guard signing.isAcceptable else {
+            throw RuntimeInstallError.installFailed(signing.reason ?? AppLocalized("Signing failed."))
+        }
+        try Task.checkCancellation()
         let verification = await RuntimeInstallVerifier.verify(
             descriptor: descriptor,
             root: scratch,
@@ -501,17 +533,7 @@ final class DeveloperRuntimeManager: ObservableObject {
                 parts.isEmpty ? AppLocalized("Runtime self-check failed.") : parts.joined(separator: " — "))
         }
 
-        // 3.6 签名：ldid 写 entitlements，再让 codex-sign 补 App Store 形态的
-        // CodeDirectory。运行时里全是 Mach-O，只做 ldid 会在执行时被杀
-        // （Bad executable / Killed: 9）；两者都缺时降级为 adhoc 并在记录里说明。
-        let signing = RuntimeSigner.signRuntime(descriptor: descriptor,
-                                                root: scratch,
-                                                canExecuteNative: hostCanRunNative)
-        guard signing.isAcceptable else {
-            try? fm.removeItem(at: scratch)
-            throw RuntimeInstallError.installFailed(signing.reason ?? AppLocalized("Signing failed."))
-        }
-
+        try Task.checkCancellation()
         await manager.publish(id, .finalizing)
         let record = InstalledRuntimeRecord(
             id: id,
@@ -529,6 +551,7 @@ final class DeveloperRuntimeManager: ObservableObject {
             await fetchBundleMetadata(metadataURL, into: scratch)
         }
         try Self.writeRecord(record, into: scratch)
+        try Task.checkCancellation()
 
         // Swap: move the old install aside, move staging into place, drop the
         // old copy. A failed move leaves the previous install untouched.
@@ -746,6 +769,16 @@ final class DeveloperRuntimeManager: ObservableObject {
         }
 
         let resumed = (http.statusCode == 206)
+        if resumed {
+            let range = http.value(forHTTPHeaderField: "Content-Range") ?? ""
+            let fields = range.split(separator: " ", maxSplits: 1)
+            let start = fields.count == 2 && fields[0].lowercased() == "bytes"
+                ? Int64(fields[1].split(separator: "-", maxSplits: 1).first ?? "") : nil
+            guard start == already else {
+                try? fm.removeItem(at: partial)
+                throw RuntimeInstallError.installFailed("Invalid Content-Range for resumed download")
+            }
+        }
         if already > 0 && !resumed {
             // Range ignored: start over rather than appending a whole body to
             // a prefix (that would corrupt both the file and the hash).
@@ -761,7 +794,11 @@ final class DeveloperRuntimeManager: ObservableObject {
             throw RuntimeInstallError.archiveTooLarge
         }
 
-        fm.createFile(atPath: partial.path, contents: nil)
+        if !fm.fileExists(atPath: partial.path) {
+            guard fm.createFile(atPath: partial.path, contents: nil) else {
+                throw RuntimeInstallError.installFailed("Cannot create download file")
+            }
+        }
         let handle = try FileHandle(forWritingTo: partial)
         do {
             try handle.seekToEnd()
@@ -782,6 +819,9 @@ final class DeveloperRuntimeManager: ObservableObject {
                     try handle.write(contentsOf: buffer)
                     hasher.update(data: buffer)
                     written += Int64(buffer.count)
+                    if let expectedSize, expectedSize > 0, written > expectedSize + 1024 * 1024 {
+                        throw RuntimeInstallError.archiveTooLarge
+                    }
                     buffer.removeAll(keepingCapacity: true)
                     let now = Date()
                     if now.timeIntervalSince(lastReport) >= 0.25 {
@@ -808,6 +848,10 @@ final class DeveloperRuntimeManager: ObservableObject {
             throw RuntimeInstallError.installFailed(error.localizedDescription)
         }
         try handle.close()
+        try Task.checkCancellation()
+        if let expectedSize, expectedSize > 0, written > expectedSize + 1024 * 1024 {
+            throw RuntimeInstallError.archiveTooLarge
+        }
 
         // A truncated transfer (connection closed early) must not be mistaken
         // for a complete file: it would fail the SHA check anyway, but retrying

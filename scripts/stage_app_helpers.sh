@@ -49,15 +49,12 @@ if [ ! -d "$SOURCE_DIR" ]; then
   exit 0
 fi
 
-shopt -s nullglob
-# 只把真正的二进制当候选：目录里放 README 说明时也算「没有可暂存的文件」，
-# 否则「空目录 no-op」的判断会被一份文档打破。
+# Explicit allowlist: never stage an app executable, agent, model/account
+# config, a notices directory as an executable, or arbitrary downloaded files.
 files=()
-for candidate in "$SOURCE_DIR"/*; do
-  case "$(basename "$candidate")" in
-    *.md|.gitkeep|.DS_Store|README*) continue ;;
-  esac
-  files+=("$candidate")
+for name in bash.real codex-sign ldid; do
+  candidate="$SOURCE_DIR/$name"
+  [ -f "$candidate" ] && files+=("$candidate")
 done
 if [ ${#files[@]} -eq 0 ]; then
   echo "stage_app_helpers: ${SOURCE_DIR} has no binaries, nothing to stage"
@@ -77,27 +74,26 @@ for file in "${files[@]}"; do
   echo "stage_app_helpers: staged ${name}"
 done
 
-# Compatibility symlinks: the runtime probes `bash`, `sh` and the single-binary
-# coreutils. Keep them pointing at real files inside the same directory so a
-# copied bundle never dangles.
+# A shell alias must be a real shell, not MT's account-bound multicall helper.
 if [ -f "${DEST}/bash.real" ]; then
   ln -sf bash.real "${DEST}/bash"
+  ln -sf bash.real "${DEST}/sh"
 fi
-if [ -f "${DEST}/ca-filetool" ]; then
-  for alias in cat chmod cp date dirname du find grep head ln ls mkdir mv realpath \
-               rm sed sh sort stat tail tar tee touch uname wc which; do
-    ln -sf ca-filetool "${DEST}/${alias}"
-  done
+# Notices and CA store remain data, never chmod +x or code-sign them.
+if [ -d "$SOURCE_DIR/Notices" ]; then
+  mkdir -p "$DEST/Notices"
+  cp -R "$SOURCE_DIR/Notices/." "$DEST/Notices/"
 fi
+for name in cacert.pem CA_NOTICE.txt provenance.json; do
+  [ ! -f "$SOURCE_DIR/$name" ] || install -m 0644 "$SOURCE_DIR/$name" "$DEST/$name"
+done
 
 # Ad-hoc sign what we just copied so the bundle's signature stays consistent.
 # The runtime re-signs its own binaries through ldid + codex-sign; this step
 # only keeps the app bundle itself valid.
 if [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ] && command -v codesign >/dev/null 2>&1; then
-  for file in "${DEST}"/*; do
-    case "$(basename "$file")" in
-      *.txt|*.md) continue ;;
-    esac
+  for name in bash.real codex-sign ldid; do
+    file="$DEST/$name"
     [ -f "$file" ] || continue
     codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY}" --preserve-metadata=identifier,entitlements "$file" 2>/dev/null \
       || echo "stage_app_helpers: warning: could not sign $(basename "$file")"

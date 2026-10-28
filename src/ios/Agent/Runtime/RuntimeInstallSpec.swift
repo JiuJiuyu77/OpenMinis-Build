@@ -31,8 +31,8 @@ struct RuntimeProbeSpec: Codable, Hashable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         executable = try container.decode(String.self, forKey: .executable)
-        arguments = (try? container.decodeIfPresent([String].self, forKey: .arguments)) ?? []
-        contains = try? container.decodeIfPresent(String.self, forKey: .contains)
+        arguments = try container.decodeIfPresent([String].self, forKey: .arguments) ?? []
+        contains = try container.decodeIfPresent(String.self, forKey: .contains)
     }
 }
 
@@ -59,16 +59,21 @@ struct RuntimeInstallSpec: Codable, Hashable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        requiredPaths = (try? container.decodeIfPresent([String].self, forKey: .requiredPaths)) ?? []
-        pathEntries = (try? container.decodeIfPresent([String].self, forKey: .pathEntries)) ?? []
-        persistentPathEntries = (try? container.decodeIfPresent([String].self,
-                                                                forKey: .persistentPathEntries)) ?? []
-        environment = (try? container.decodeIfPresent([String: String].self,
-                                                      forKey: .environment)) ?? [:]
-        probe = try? container.decodeIfPresent(RuntimeProbeSpec.self, forKey: .probe)
-        signPaths = (try? container.decodeIfPresent([String].self, forKey: .signPaths)) ?? []
-        signPathsWithoutEntitlements = (try? container.decodeIfPresent([String].self,
-                                                                       forKey: .signPathsWithoutEntitlements)) ?? []
+        requiredPaths = try container.decodeIfPresent([String].self, forKey: .requiredPaths) ?? []
+        pathEntries = try container.decodeIfPresent([String].self, forKey: .pathEntries) ?? []
+        persistentPathEntries = try container.decodeIfPresent([String].self, forKey: .persistentPathEntries) ?? []
+        environment = try container.decodeIfPresent([String: String].self, forKey: .environment) ?? [:]
+        probe = try container.decodeIfPresent(RuntimeProbeSpec.self, forKey: .probe)
+        signPaths = try container.decodeIfPresent([String].self, forKey: .signPaths) ?? []
+        signPathsWithoutEntitlements = try container.decodeIfPresent([String].self, forKey: .signPathsWithoutEntitlements) ?? []
+        let paths = requiredPaths + pathEntries + persistentPathEntries + signPaths + signPathsWithoutEntitlements
+            + (probe.map { [$0.executable] } ?? [])
+        guard paths.allSatisfy(RuntimePathPolicy.isRelativePath),
+              environment.allSatisfy({ !$0.key.isEmpty && !$0.key.contains("=") && !$0.key.contains("\0") && !$0.value.contains("\0") }),
+              probe?.arguments.allSatisfy({ !$0.contains("\0") }) ?? true else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath,
+                                                    debugDescription: "Unsafe runtime install path or environment"))
+        }
     }
 
     /// 清单里没写 `install` 的运行时（App 自管 handler）按「无需自检」处理。
@@ -105,8 +110,8 @@ struct RuntimeInstallSpec: Codable, Hashable {
     /// 而是由每个 bundle 自己带一份。`install` 块缺失或不带 `sign_paths` 时
     /// 回退读它，否则「装了但一个都没签」—— 执行时就是 Bad executable。
     static func bundleSignPaths(in root: URL) -> [String] {
-        let manifest = root.appendingPathComponent("manifest.json")
-        guard let data = try? Data(contentsOf: manifest),
+        guard let manifest = RuntimePathPolicy.containedURL("manifest.json", in: root),
+              let data = try? Data(contentsOf: manifest),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return []
         }
@@ -118,13 +123,38 @@ struct RuntimeInstallSpec: Codable, Hashable {
         if !signPaths.isEmpty || !signPathsWithoutEntitlements.isEmpty {
             return (signPaths, signPathsWithoutEntitlements)
         }
-        return (Self.bundleSignPaths(in: root), [])
+        let manifest = RuntimePathPolicy.containedURL("manifest.json", in: root)
+        let object = manifest.flatMap { try? Data(contentsOf: $0) }
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        return (Self.bundleSignPaths(in: root),
+                object?["sign_paths_without_entitlements"] as? [String] ?? [])
     }
 
     /// `required_paths` 里当前缺失的项（顺序与清单一致）。
     func missingPaths(in root: URL) -> [String] {
         let fm = FileManager.default
-        return requiredPaths.filter { !fm.fileExists(atPath: root.appendingPathComponent($0).path) }
+        return requiredPaths.filter {
+            guard let url = RuntimePathPolicy.containedURL($0, in: root) else { return true }
+            return !fm.fileExists(atPath: url.path)
+        }
+    }
+}
+
+/// Shared containment policy for manifest paths, signing targets and tar members.
+/// Lexical checks alone do not stop an in-tree symlink chain from escaping.
+enum RuntimePathPolicy {
+    static func isRelativePath(_ path: String) -> Bool {
+        !path.isEmpty && !path.hasPrefix("/") && !path.contains("\0")
+            && !path.split(separator: "/").contains("..")
+    }
+
+    static func containedURL(_ path: String, in root: URL) -> URL? {
+        guard isRelativePath(path) else { return nil }
+        let base = root.standardizedFileURL.resolvingSymlinksInPath()
+        let candidate = root.appendingPathComponent(path).standardizedFileURL
+        let resolved = candidate.resolvingSymlinksInPath().path
+        guard resolved == base.path || resolved.hasPrefix(base.path + "/") else { return nil }
+        return candidate
     }
 }
 
@@ -159,7 +189,7 @@ enum RuntimeEnvironmentOverlay {
         exports["CA_RUNTIME_ID"] = descriptor.id
         exports["CA_RUNTIME_VERSION"] = descriptor.version
         exports["CA_RUNTIME_HANDLER"] = descriptor.handler ?? "portable-v1"
-        exports["CA_RUNTIME_ROOT"] = root.deletingLastPathComponent().path
+        exports["CA_RUNTIME_ROOT"] = root.path
         exports["CA_TOOL_\(envelopeKey(descriptor.id))_RUNTIME_ROOT"] = root.path
         // 兼容既有调用方（设置页与 NativeToolchain 之前用的是这个名字）。
         exports["MINIS_RUNTIME_ROOT"] = root.path
@@ -169,12 +199,33 @@ enum RuntimeEnvironmentOverlay {
         var search: [String] = []
         let fm = FileManager.default
         for entry in spec.pathEntries {
-            let url = root.appendingPathComponent(entry, isDirectory: true)
-            if fm.fileExists(atPath: url.path) { search.append(url.path) }
+            guard let url = RuntimePathPolicy.containedURL(entry, in: root),
+                  (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true else { continue }
+            if !search.contains(url.path) { search.append(url.path) }
         }
         for fallback in ["usr/bin", "bin"] {
-            let url = root.appendingPathComponent(fallback, isDirectory: true)
-            if fm.fileExists(atPath: url.path), !search.contains(url.path) { search.append(url.path) }
+            guard let url = RuntimePathPolicy.containedURL(fallback, in: root),
+                  (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true else { continue }
+            if !search.contains(url.path) { search.append(url.path) }
+        }
+
+        // Published persistent entries are home-relative, not runtime-relative.
+        // Do not rename the CodexApp component: it is part of the Node asset contract.
+        let home = fm.homeDirectoryForCurrentUser
+        for entry in spec.persistentPathEntries {
+            guard let url = RuntimePathPolicy.containedURL(entry, in: home),
+                  (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true else { continue }
+            if !search.contains(url.path) { search.append(url.path) }
+        }
+
+        // Staged Theos tools link against sibling dylibs before they are installed.
+        for (key, paths) in [("DYLD_LIBRARY_PATH", ["usr/lib", "lib"]),
+                             ("DYLD_FRAMEWORK_PATH", ["Frameworks"])] {
+            let directories = paths.compactMap { RuntimePathPolicy.containedURL($0, in: root) }
+                .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true }
+            if exports[key] == nil, !directories.isEmpty {
+                exports[key] = directories.map(\.path).joined(separator: ":")
+            }
         }
 
         // 4. theos 运行时：派生 CA_THEOS_*（清单不声明，靠树结构推导）。
@@ -230,7 +281,7 @@ enum RuntimeEnvironmentOverlay {
                                                         includingPropertiesForKeys: nil) else { return nil }
         return entries
             .filter { $0.pathExtension == "sdk" }
-            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            .sorted { $0.lastPathComponent.compare($1.lastPathComponent, options: .numeric) == .orderedAscending }
             .last
     }
 
