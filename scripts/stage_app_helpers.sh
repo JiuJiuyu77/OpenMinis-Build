@@ -33,13 +33,17 @@ if [ -z "$PRODUCTS_DIR" ] || [ -z "$WRAPPER" ]; then
   exit 0
 fi
 
-# Xcode 的 SRCROOT 是 src/ios，二进制放在仓库根的 Configs/Helpers/；
-# 独立调用时 SRCROOT 可能就是仓库根，两种都认。
-if [ -d "${SRCROOT}/Configs/Helpers" ]; then
-  SOURCE_DIR="${SRCROOT}/Configs/Helpers"
-else
-  SOURCE_DIR="${SRCROOT}/../Configs/Helpers"
-fi
+# 二进制放在仓库根的 Configs/Helpers/。Xcode 里 SRCROOT 是 <repo>/src/ios，
+# 独立调用时 SRCROOT 可能就是仓库根，也可能压根没设 —— 所以先按「本脚本所在
+# 位置」推仓库根（scripts/ 的上一级），推不出来再退回 SRCROOT 的几种层级。
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SOURCE_DIR=""
+for candidate in "${REPO_ROOT}/Configs/Helpers" \
+                 "${SRCROOT:-/nonexistent}/Configs/Helpers" \
+                 "${SRCROOT:-/nonexistent}/../Configs/Helpers" \
+                 "${SRCROOT:-/nonexistent}/../../Configs/Helpers"; do
+  if [ -d "$candidate" ]; then SOURCE_DIR="$candidate"; break; fi
+done
 if [ ! -d "$SOURCE_DIR" ]; then
   echo "stage_app_helpers: ${SOURCE_DIR} does not exist, nothing to stage"
   exit 0

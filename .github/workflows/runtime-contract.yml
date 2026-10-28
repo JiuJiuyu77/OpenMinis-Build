@@ -154,6 +154,14 @@ jobs:
             || { echo "Stage App Helpers build phase missing from the app target" >&2; exit 1; }
           grep -q 'scripts/stage_app_helpers.sh' "$project" \
             || { echo "the build phase does not call stage_app_helpers.sh" >&2; exit 1; }
+          # 路径必须能从 src/ios 解析出来：写成 ../scripts/... 就会在构建时
+          # 「No such file or directory」把整个 App 编译搞挂（踩过一次）。
+          script_path=$(grep -o '${SRCROOT}/[^"]*stage_app_helpers.sh' "$project" | head -1 | sed 's|${SRCROOT}/||')
+          test -n "$script_path" || { echo "cannot read the script path from the build phase" >&2; exit 1; }
+          test -f "src/ios/$script_path" || {
+            echo "build phase path does not resolve: src/ios/$script_path" >&2; exit 1; }
+          echo "ok: stage_app_helpers.sh resolves from SRCROOT"
+
           # 阶段必须挂在应用 target 的 buildPhases 里，而不只是定义在工程里。
           awk '/isa = PBXNativeTarget;/{tgt=1} tgt && /buildPhases = \(/{ph=1} ph && /Stage App Helpers/{found=1} ph && /\);/{if(found){print "ok: staged in target"; exit 0}; ph=0}' "$project" \
             | grep -q 'ok: staged' || { echo "build phase is not attached to a target" >&2; exit 1; }

@@ -3098,7 +3098,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
-			shellScript = "\"${SRCROOT}/../scripts/stage_app_helpers.sh\"\n";
+			shellScript = "\"${SRCROOT}/../../scripts/stage_app_helpers.sh\"\n";
 		};
 		AC0000200 /* Generate Provider Customization */ = {
 			isa = PBXShellScriptBuildPhase;
