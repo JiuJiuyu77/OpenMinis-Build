@@ -93,12 +93,14 @@ jobs:
           swiftc -version
           swiftc -parse src/ios/Agent/Runtime/*.swift
           swiftc -parse src/ios/Agent/NativeBuild/IPAShellPacker.swift \
-                        src/ios/Agent/NativeBuild/NativeBuildService.swift
+                        src/ios/Agent/NativeBuild/NativeBuildService.swift \
+                        src/ios/Agent/NativeBuild/RuntimeRepair.swift \
+                        src/ios/Agent/NativeBuild/NativeCommandRunner.swift \
+                        src/ios/Agent/NativeBuild/ToolExecutorPreference.swift \
+                        src/ios/Agent/NativeBuild/NativeToolchain.swift
           swiftc -parse src/ios/Views/Settings/DeveloperRuntimeSettingsView.swift \
                         src/ios/Views/Settings/RuntimeDiagnosticsView.swift \
-                        src/ios/Views/Settings/ToolExecutorSettingsView.swift
-          swiftc -parse src/ios/Agent/NativeBuild/ToolExecutorPreference.swift \
-                        src/ios/Agent/NativeBuild/NativeToolchain.swift
+                        src/ios/Views/Settings/SettingsSheet.swift
           echo "runtime sources parse cleanly"
 
       - name: Install gates are wired
