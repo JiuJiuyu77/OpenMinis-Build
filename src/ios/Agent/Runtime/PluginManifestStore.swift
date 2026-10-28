@@ -177,60 +177,6 @@ final class PluginManifestStore: ObservableObject {
     /// 安装一个本地压缩包（.zip / .tar.gz）为插件：解包到
     /// `plugins/<id>/`，要求解包结果里直接有 `manifest.json`。
     @discardableResult
-    /// [T-plugin-market] 精选目录里带 `download_url` 的条目一键安装。
-    ///
-    /// 之前只有「自己下载 zip，再回来选文件」这一条路：目录里明明写了
-    /// download_url，却要用户手动复制到浏览器。这里补上下载这一段，装包仍然
-    /// 走 installArchive，行为与手动安装完全一致（包含解包后剥一层目录）。
-    /// sha256 若在目录里给出就强制校验，避免装进半个损坏的包。
-    func installFromCatalog(_ entry: CuratedPluginEntry) async -> Bool {
-        guard let raw = entry.downloadURL, let url = URL(string: raw), !raw.isEmpty else {
-            lastError = "Plugin \(entry.id) has no download_url in the catalog"
-            return false
-        }
-        if fileExists(pluginID: entry.id) {
-            lastError = "Plugin \(entry.id) is already installed"
-            return false
-        }
-        do {
-            let (temp, response) = try await URLSession.shared.download(from: url)
-            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                lastError = "Download failed for \(entry.id) (HTTP \(http.statusCode))"
-                return false
-            }
-            // installArchive 靠扩展名决定用 zip 还是 tar.gz 解包，临时文件必须带上。
-            let ext = url.pathExtension.isEmpty ? "zip" : url.pathExtension
-            let staged = FileManager.default.temporaryDirectory
-                .appendingPathComponent("plugin-\(entry.id)-\(UUID().uuidString).\(ext)")
-            try? FileManager.default.removeItem(at: staged)
-            try FileManager.default.moveItem(at: temp, to: staged)
-            defer { try? FileManager.default.removeItem(at: staged) }
-
-            if let expected = entry.sha256, !expected.isEmpty {
-                let actual = try Self.sha256Hex(of: staged)
-                if actual.lowercased() != expected.lowercased() {
-                    lastError = "Checksum mismatch for \(entry.id) — refusing to install"
-                    return false
-                }
-            }
-            return installArchive(staged, pluginID: entry.id)
-        } catch {
-            lastError = "Download failed for \(entry.id): \(error.localizedDescription)"
-            return false
-        }
-    }
-
-    /// 已安装判定（目录重装前先挡一下）。
-    private func fileExists(pluginID: String) -> Bool {
-        let dir = Self.pluginsDirectory.appendingPathComponent(pluginID, isDirectory: true)
-        return FileManager.default.fileExists(atPath: dir.path)
-    }
-
-    private static func sha256Hex(of url: URL) throws -> String {
-        let data = try Data(contentsOf: url)
-        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-    }
-
     func installArchive(_ archive: URL, pluginID: String) -> Bool {
         let dest = Self.pluginsDirectory.appendingPathComponent(pluginID, isDirectory: true)
         if fm.fileExists(atPath: dest.path) {
