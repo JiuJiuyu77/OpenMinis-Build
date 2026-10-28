@@ -178,14 +178,14 @@ enum RuntimeProbeRunner {
                           spawnError: "pipe() failed")
         }
 
-        var fileActions = posix_spawn_file_actions_t()
+        var fileActions: posix_spawn_file_actions_t? = nil
         posix_spawn_file_actions_init(&fileActions)
         defer { posix_spawn_file_actions_destroy(&fileActions) }
         posix_spawn_file_actions_addopen(&fileActions, STDIN_FILENO, "/dev/null", O_RDONLY, 0)
         posix_spawn_file_actions_adddup2(&fileActions, pipefds[1], STDOUT_FILENO)
         posix_spawn_file_actions_adddup2(&fileActions, pipefds[1], STDERR_FILENO)
 
-        var attrs = posix_spawnattr_t()
+        var attrs: posix_spawnattr_t? = nil
         posix_spawnattr_init(&attrs)
         defer { posix_spawnattr_destroy(&attrs) }
         // 新进程组，超时才好一次杀干净。

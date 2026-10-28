@@ -145,35 +145,7 @@ struct NativeToolchain {
 
     // MARK: - 探测
 
-    /// 候选根目录，按优先级：
-    /// 1. App 内置 `NativeToolchain/`（把运行时随包分发时用）
-    /// 2. App 容器 `Library/Application Support/NativeToolchain/`
-    /// 3. MT 智能体已下载的运行时（与 MT 共用一份，省 224MB）
-    /// 用户手动指定的工具链根目录（设置 → 执行器 → 工具链 → 手动指定）。
-    /// 探测失败时的兜底：不猜布局，直接用用户给的路径。
-    static let manualRootKey = "nativeToolchain.rootOverride"
 
-    static var manualRootPath: String? {
-        get {
-            let raw = UserDefaults.standard.string(forKey: manualRootKey)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return raw.isEmpty ? nil : raw
-        }
-        set {
-            let trimmed = (newValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty {
-                UserDefaults.standard.removeObject(forKey: manualRootKey)
-            } else {
-                UserDefaults.standard.set(trimmed, forKey: manualRootKey)
-            }
-            shared.resetCache()
-        }
-    }
-
-    /// 候选根目录，按优先级：
-    /// 1. App 内置 `NativeToolchain/`（把运行时随包分发时用）
-    /// 2. App 容器 `Library/Application Support/NativeToolchain/`
-    /// 3. MT 智能体已下载的运行时（与 MT 共用一份，省 224MB）
     /// 用户手动指定的工具链根目录（设置 → 执行器 → 工具链 → 手动指定）。
     /// 探测失败时的兜底：不猜布局，直接用用户给的路径。
     static let manualRootKey = "nativeToolchain.rootOverride"
@@ -205,6 +177,7 @@ struct NativeToolchain {
     /// 自己自检、自己签名，借对方的目录只会带来 mmap 失败与假「已就绪」。
     static func candidateRoots() -> [URL] {
         var roots: [URL] = []
+        var seen = Set<String>()
         if let manual = manualRootPath {
             roots.append(URL(fileURLWithPath: manual, isDirectory: true))
         }

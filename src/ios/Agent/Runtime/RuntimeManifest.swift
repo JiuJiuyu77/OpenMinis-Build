@@ -68,7 +68,7 @@ struct RuntimeDescriptor: Codable, Identifiable, Hashable {
     let runtimeFormat: Int?
     /// 清单里的 `install` 块：自检三元组、PATH 入口与运行时环境。
     /// App 自管 handler（codex / theos / python / reverse_tools）不发布这个字段。
-    let install: RuntimeInstallSpec?
+    var install: RuntimeInstallSpec? = nil
 
     struct RuntimeCapability: Codable, Hashable {
         let title: String?

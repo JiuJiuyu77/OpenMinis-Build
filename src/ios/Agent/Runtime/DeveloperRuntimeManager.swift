@@ -273,8 +273,8 @@ final class DeveloperRuntimeManager: ObservableObject {
         for (capability, doc) in descriptor.capabilities ?? [:] {
             guard (descriptor.provides ?? []).contains(capability) else { continue }
             for requirement in doc.requires {
-                if let id = requirement.id, manifest?.runtimes[id] != nil {
-                    require(id)
+                if manifest?.runtimes[requirement.id] != nil {
+                    require(requirement.id)
                 } else if let provided = requirement.provides,
                           let provider = runtimes.first(where: {
                               ($0.provides ?? []).contains(provided) && $0.id != descriptor.id
