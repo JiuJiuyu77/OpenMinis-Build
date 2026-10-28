@@ -1,0 +1,44 @@
+Bundled terminal and update components
+
+GNU Bash 5.3, Copyright Free Software Foundation.
+Source: https://www.gnu.org/software/bash/
+Source archive SHA-256: 0d5cd86965f869a26cf64f4b71be7b96f90a3ba8b3d74e27e8e9d9d5550f31ba
+License: GPL-3.0-or-later, reproduced in ThirdPartyNotices/Bash.txt.
+The complete corresponding upstream source archive and our build script are
+included in ThirdPartySources/. The source is unmodified. Bash is a separate
+executable, launched by the Codex CLI through the Runtime process environment.
+It is built without readline, gettext, network redirections or programmable
+completion; its only dynamic dependencies are Apple's libSystem and libiconv.
+
+Zstandard 1.5.7, Copyright Meta Platforms, Inc. and affiliates.
+Source: https://github.com/facebook/zstd/releases/tag/v1.5.7
+Source archive SHA-256: eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3
+License: BSD-3-Clause, reproduced in ThirdPartyNotices/Zstandard.txt.
+The decompression and common C sources are kept in ThirdParty/zstd/.
+
+TrollStore fastPathSign (GPL-3.0), separate executable.
+Source archive SHA-256: e0305ce9e0b905f3bc741d90251d6380061f75fe781834428ec0dcf7d3baf69b
+Source: https://github.com/opa334/TrollStore/tree/main/Exploits/fastPathSign
+ChOma commit 964023ddac2286ef8e843f90df64d44ac6a673df (MIT).
+Source archive SHA-256: e95d0f98bda5b6fdf65b76ea9fa8c567ea8377128660d42a41a2cf4c22a14d3c
+Source: https://github.com/opa334/ChOma
+OpenSSL 3.2.1 static iOS libcrypto from the pinned ChOma archive (Apache-2.0).
+Configured OpenSSL 3.6.0 headers used to compile the signer are included.
+Notices are in FastPathSign.txt, ChOma.txt and OpenSSL.txt.
+Unmodified signer sources, dependencies and our build script are included in
+ThirdPartySources/; run scripts/build-native-tools.py with CA_IOS_SDK set to
+an iPhoneOS SDK path to reproduce. Use --shell-only to build only GNU Bash.
+
+ripgrep 15.2.0 (MIT or Unlicense), built for aarch64-apple-ios with Rust 1.99.0.
+Source: https://github.com/BurntSushi/ripgrep/releases/tag/15.2.0
+Source archive SHA-256: 7605249d3eb0d5f170e3414498e3344e26b1e7a147aec518b57090b80036a562
+The upstream source and pinned Rust component download checksums are included
+in ThirdPartySources/ThirdParty/ripgrep/. No PCRE dependency is enabled.
+Licenses are reproduced in Ripgrep.txt, Ripgrep-MIT.txt and Ripgrep-Unlicense.txt.
+
+jq 1.8.2, including the bundled Oniguruma regular-expression engine.
+Source: https://github.com/jqlang/jq/releases/tag/jq-1.8.2
+Source archive SHA-256: 71b8d6e8f5fe81f6c6d0d110e3892251f6ce76ed095abd315e26e6e1193af3af
+Built as a separate aarch64-apple-ios executable for CoreTools with the
+release tarball's bundled Oniguruma, so the installed runtime has no external
+Oniguruma dependency. Licenses are reproduced in JQ.txt and Oniguruma.txt.

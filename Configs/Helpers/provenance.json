@@ -1,0 +1,19 @@
+{
+  "archive_sha256": "6aa57a515561cd3fa764571c80a53c4046c171d04ce848362440c8fb8c04f7b3",
+  "helpers": {
+    "bash.real": {
+      "sha256": "8f5ed6aa8d9baaa9b43c839ddca01e2f71890f4bb22d29411330f89557a33e59",
+      "bytes": 811744
+    },
+    "codex-sign": {
+      "sha256": "3aea4b81169a82fbe39e79d8299d2fe6e4c9e27bd79695ac8d881e6a3e4aecf3",
+      "bytes": 3514720
+    }
+  },
+  "excluded": [
+    "CodexApp executable",
+    "Codex agent/app-server",
+    "ca-filetool and MT authorisation hooks"
+  ],
+  "redistribution": "Provide complete corresponding sources/build scripts and notices before redistributing."
+}

@@ -1,0 +1,20 @@
+Bundled TLS root certificates
+
+Source: https://curl.se/ca/cacert-2026-09-25.pem
+Converted from Mozilla's public CA store by the curl project.
+Snapshot: 2026-09-25
+Certificates: 121
+SHA-256: a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505
+
+The CA certificate store is licensed under the Mozilla Public License 2.0.
+License: https://www.mozilla.org/MPL/2.0/
+Original Mozilla source: https://hg.mozilla.org/projects/nss/raw-file/tip/lib/ckfw/builtins/certdata.txt
+Conversion information: https://curl.se/docs/caextract.html
+
+CodexApp supplies this bundle through SSL_CERT_FILE when no explicit
+CODEX_CA_CERTIFICATE or SSL_CERT_FILE override was provided.
+TLS certificate and hostname verification remain enabled.
+
+To update, download a dated bundle and its .sha256 from curl.se over HTTPS,
+verify the SHA-256 and PEM parsing, replace Resources/cacert.pem, and update
+this notice. The app package must include both this notice and cacert.pem.

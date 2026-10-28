@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "product": "OpenMinis codex-sign",
+  "source_build_required": true,
+  "trollstore": {
+    "repository": "https://github.com/opa334/TrollStore",
+    "commit": "88424f683b2a08f34a3f88985f790f97d84ce1df",
+    "path": "Exploits/fastPathSign/src"
+  },
+  "choma": {
+    "repository": "https://github.com/opa334/ChOma",
+    "commit": "964023ddac2286ef8e843f90df64d44ac6a673df",
+    "role": "TrollStore pinned submodule"
+  },
+  "openssl": {
+    "release": "openssl-3.5.9",
+    "archive_sha256": "603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a",
+    "role": "source-built iOS arm64 libcrypto.a"
+  },
+  "target": "arm64-apple-ios15.0",
+  "licenses": {
+    "TrollStore": "MIT",
+    "ChOma": "MIT",
+    "OpenSSL": "Apache-2.0",
+    "GPL-3.0": "not a dependency",
+    "MPL-2.0": "not a dependency"
+  },
+  "complete_source_assets": [
+    "fixed TrollStore checkout including its LICENSE and ChOma submodule",
+    "OpenSSL-3.5.9 source archive and checksum",
+    "scripts/runtime-signer/adapter.m",
+    "scripts/build_runtime_signer.sh",
+    "scripts/runtime-signer/README.md",
+    "scripts/runtime-signer/THIRD_PARTY_NOTICES.md"
+  ],
+  "runtime_contract": {
+    "adhoc_only_never_calls_coretrust": true,
+    "default_calls_real_coretrust_path": true,
+    "multiple_files": true,
+    "failure_does_not_replace_originals": true,
+    "restores_mode_uid_gid": true,
+    "fat": "extract preferred arm64/arm64e slice and discard other slices"
+  },
+  "verification_status": "source-build candidate; device CoreTrust/bootstrap validation is not claimed here"
+}

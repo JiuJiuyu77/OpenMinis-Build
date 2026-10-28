@@ -188,6 +188,22 @@ jobs:
           brew install ldid || true
           which ldid && ldid -h | head -3 || echo "ldid missing"
 
+      - name: Verify bundled native runtime helpers
+        if: ${{ inputs.mode != 'check' }}
+        run: |
+          set -euo pipefail
+          # The release is intentionally self-contained: the exact helper
+          # inputs are checked into Configs/Helpers from the supplied MT
+          # reference. The source-rebuild workflow is separate and must never
+          # silently turn a release into an app without its signer.
+          test -x "$GITHUB_WORKSPACE/Configs/Helpers/codex-sign"
+          test -x "$GITHUB_WORKSPACE/Configs/Helpers/bash.real"
+          test -f "$GITHUB_WORKSPACE/Configs/Helpers/provenance.json"
+          test -d "$GITHUB_WORKSPACE/Configs/Helpers/Notices"
+          sha256sum "$GITHUB_WORKSPACE/Configs/Helpers/codex-sign" \
+                    "$GITHUB_WORKSPACE/Configs/Helpers/bash.real" \
+                    "$GITHUB_WORKSPACE/Configs/Helpers/provenance.json"
+
       - name: Cache DerivedData (incremental Swift)
         if: ${{ inputs.dd_cache != false }}
         uses: actions/cache@v4
