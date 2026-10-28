@@ -3,6 +3,11 @@
 import Foundation
 import Darwin
 
+#if os(iOS)
+struct MinisHostEnvironmentReport { let hasNativeEntitlements = true }
+enum MinisHostEnvironmentDetector { static let cached = MinisHostEnvironmentReport() }
+#endif
+
 struct NativeToolchain {
     static let shared = NativeToolchain()
     var shellPath: String? { "/bin/sh" }

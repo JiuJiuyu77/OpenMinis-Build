@@ -526,9 +526,11 @@ enum RuntimeTarGzExtractor {
         /// targets whose normalised form stays under the extraction root.
         private func isContainedLinkTarget(_ target: String, at parent: URL) -> Bool {
             guard !target.hasPrefix("/"), !target.contains("\0") else { return false }
-            guard let candidate = RuntimePathPolicy.canonicalURL(parent.appendingPathComponent(target))?.path,
-                  let root = RuntimePathPolicy.canonicalURL(destination)?.path else { return false }
-            return candidate == root || candidate.hasPrefix(root + "/")
+            guard let candidateURL = RuntimePathPolicy.canonicalURL(parent.appendingPathComponent(target)),
+                  let rootURL = RuntimePathPolicy.canonicalURL(destination) else { return false }
+            let candidate = "/" + candidateURL.path.split(separator: "/").joined(separator: "/")
+            let root = "/" + rootURL.path.split(separator: "/").joined(separator: "/")
+            return candidate == root || candidate.hasPrefix(root == "/" ? "/" : root + "/")
         }
 
         private func octal(_ header: Data, _ offset: Int, _ length: Int) throws -> Int64 {

@@ -151,11 +151,10 @@ enum RuntimePathPolicy {
     static func containedURL(_ path: String, in root: URL) -> URL? {
         guard isRelativePath(path) else { return nil }
         guard let canonical = canonicalURL(root) else { return nil }
-        let base = URL(fileURLWithPath: "/" + canonical.path.split(separator: "/").joined(separator: "/"))
         let candidate = root.appendingPathComponent(path).standardizedFileURL
         guard let target = canonicalURL(candidate) else { return nil }
         let resolved = "/" + target.path.split(separator: "/").joined(separator: "/")
-        let basePath = "/" + base.path.split(separator: "/").joined(separator: "/")
+        let basePath = "/" + canonical.path.split(separator: "/").joined(separator: "/")
         guard resolved == basePath || resolved.hasPrefix(basePath == "/" ? "/" : basePath + "/") else { return nil }
         return candidate
     }
@@ -181,7 +180,10 @@ enum RuntimePathPolicy {
                 resolved = next
             }
         }
-        return resolved.standardizedFileURL
+        // Do not re-standardize here: Foundation rewrites existing
+        // /private/var aliases to /var, but not a not-yet-created leaf.
+        // That would make a valid child disagree with its canonical parent.
+        return resolved
     }
 }
 
@@ -233,7 +235,7 @@ enum RuntimeEnvironmentOverlay {
 
         // Published persistent entries are home-relative, not runtime-relative.
         // Do not rename the CodexApp component: it is part of the Node asset contract.
-        let home = fm.homeDirectoryForCurrentUser
+        let home = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
         for entry in spec.persistentPathEntries {
             guard let url = RuntimePathPolicy.containedURL(entry, in: home),
                   (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true else { continue }

@@ -151,16 +151,8 @@ final class DeveloperRuntimeManager: ObservableObject {
 
     // MARK: - Manifest
 
-    /// 故意**不安装**的 handler。
-    ///
-    /// 清单里的 `codex` 条目是另一套 App 的 AI 执行层（Codex CLI / app-server /
-    /// Code Mode Host）。Minis 有自己的 Agent 架构，不接管别人的 agent 运行时：
-    /// 这里只消费工具链类运行时（Theos / OLLVM / Node / Python / CoreTools /
-    /// ReverseTools），codex 条目在列表里连显示都不该出现，免得用户装一个
-    /// 与本 App 无关的 100MB deb。
-    static let unsupportedHandlers: Set<String> = ["codex"]
-
-    /// 本 App 会展示与安装的运行时：清单顺序减去不采纳的 handler。
+    /// Use the descriptor's single id/handler/capability gate. Minis consumes
+    /// general toolchains, never another app's Codex agent runtime.
     var runtimes: [RuntimeDescriptor] {
         (manifest?.orderedRuntimes ?? []).filter { $0.isSupportedRuntime }
     }

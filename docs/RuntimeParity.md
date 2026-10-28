@@ -35,6 +35,14 @@ setting `CA_THEOS_EMBEDDED=1` recreates those patches. It uses its own installed
 Theos/core tools. Exact equivalence for every MT forkless recipe is **not yet
 established**.
 
+The published Arkari OLLVM metadata currently uses `-irobf`/`--irobf-*`, while
+older workbench presets still describe legacy `-fla/-bcf/-sobf` passes. This PR
+preserves the runtime's explicit empty PATH but does **not** claim that those
+workbench presets are compatible. A separate metadata-driven compiler/pass
+selection and real device compilation remain necessary. TAR PAX/base-256 and
+forward hardlinks also remain unsupported; a complete seven-archive extraction
+was not performed in this change.
+
 The Lite archive includes bash/signature helpers but omits the corresponding
 source/build scripts promised in its notices. They are not silently published
 in this source tree. `scripts/import_runtime_helpers.py` permits a local,
@@ -64,7 +72,7 @@ On a compatible TrollStore/jailbroken iOS device, install/update Theos, Node,
 Python, core tools, build tools, reverse tools and OLLVM. Verify:
 
 1. `minis-runtime --doctor` reports `path: c-abi-linked` (bridge-only scope).
-2. Diagnostics runs a real shell plus `make --version`; inspect child uid,
+2. Diagnostics runs a real shell plus a make recipe; inspect child uid,
    signature reports, SDK and dynamic-library paths.
 3. `minis-runtime node -e 'console.log(process.version)'`, Python import test,
    git/curl HTTPS, cmake/ninja and reverse tools actually run.

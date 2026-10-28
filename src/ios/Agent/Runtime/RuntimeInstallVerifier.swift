@@ -168,6 +168,19 @@ enum RuntimeProbeRunner {
         }
     }
 
+    /// The symbol exists on supported iOS runtimes but SDK headers mark the
+    /// direct call unavailable. Resolve it explicitly, never chdir the app's
+    /// process-wide cwd (other offloads execute concurrently).
+    private static func addWorkingDirectory(_ actions: inout posix_spawn_file_actions_t?,
+                                            _ directory: String) -> Int32 {
+        typealias AddChdir = @convention(c) (UnsafeMutablePointer<posix_spawn_file_actions_t?>, UnsafePointer<CChar>) -> Int32
+        let handle = UnsafeMutableRawPointer(bitPattern: -2)
+        guard let symbol = dlsym(handle, "posix_spawn_file_actions_addchdir_np")
+                ?? dlsym(handle, "posix_spawn_file_actions_addchdir") else { return ENOTSUP }
+        let function = unsafeBitCast(symbol, to: AddChdir.self)
+        return directory.withCString { function(&actions, $0) }
+    }
+
     static func run(executable: String,
                     arguments: [String],
                     environment: [String: String],
@@ -202,7 +215,7 @@ enum RuntimeProbeRunner {
             posix_spawn_file_actions_adddup2(&fileActions, pipefds[1], STDERR_FILENO),
             posix_spawn_file_actions_addclose(&fileActions, pipefds[0]),
             posix_spawn_file_actions_addclose(&fileActions, pipefds[1]),
-            posix_spawn_file_actions_addchdir_np(&fileActions, workingDirectory)
+            addWorkingDirectory(&fileActions, workingDirectory)
         ]
         guard actionStatuses.allSatisfy({ $0 == 0 }) else {
             return Result(status: -1, output: "", timedOut: false, spawnError: "spawn file actions configuration failed")
