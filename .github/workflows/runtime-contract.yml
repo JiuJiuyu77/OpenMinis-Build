@@ -23,6 +23,8 @@ on:
       - "src/ios/Agent/NativeBuild/**"
       - "src/ios/Views/Settings/DeveloperRuntimeSettingsView.swift"
       - "scripts/stage_app_helpers.sh"
+      - "src/ios/Minis.xcodeproj/project.pbxproj"
+      - "scripts/check_xcode_project_files.py"
       - ".github/workflows/runtime-contract.yml"
   pull_request:
     paths:
@@ -121,6 +123,13 @@ jobs:
             exit 1
           fi
           echo "self-check + signing + environment overlay are wired into the manager"
+
+      - name: Every Swift file is registered in the Xcode project
+        run: |
+          set -euo pipefail
+          # Agent/Runtime 与 Views 是经典 group，新文件必须手工登记 pbxproj；
+          # 漏登记在 App 构建时报 "cannot find type X in scope"（正式版曾因此失败）。
+          python3 scripts/check_xcode_project_files.py --strict
 
       - name: Localization coverage report
         run: |
