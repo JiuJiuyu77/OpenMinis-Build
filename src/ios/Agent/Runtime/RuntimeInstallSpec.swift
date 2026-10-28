@@ -60,7 +60,7 @@ struct RuntimeInstallSpec: Codable, Hashable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         requiredPaths = try container.decodeIfPresent([String].self, forKey: .requiredPaths) ?? []
-        pathEntries = try container.decodeIfPresent([String].self, forKey: .pathEntries) ?? []
+        pathEntries = try container.decodeIfPresent([String].self, forKey: .pathEntries) ?? ["usr/bin", "bin"]
         persistentPathEntries = try container.decodeIfPresent([String].self, forKey: .persistentPathEntries) ?? []
         environment = try container.decodeIfPresent([String: String].self, forKey: .environment) ?? [:]
         probe = try container.decodeIfPresent(RuntimeProbeSpec.self, forKey: .probe)
@@ -78,7 +78,7 @@ struct RuntimeInstallSpec: Codable, Hashable {
 
     /// 清单里没写 `install` 的运行时（App 自管 handler）按「无需自检」处理。
     static let none = RuntimeInstallSpec(requiredPaths: [],
-                                         pathEntries: [],
+                                         pathEntries: ["usr/bin", "bin"],
                                          persistentPathEntries: [],
                                          environment: [:],
                                          probe: nil,
@@ -200,11 +200,6 @@ enum RuntimeEnvironmentOverlay {
         let fm = FileManager.default
         for entry in spec.pathEntries {
             guard let url = RuntimePathPolicy.containedURL(entry, in: root),
-                  (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true else { continue }
-            if !search.contains(url.path) { search.append(url.path) }
-        }
-        for fallback in ["usr/bin", "bin"] {
-            guard let url = RuntimePathPolicy.containedURL(fallback, in: root),
                   (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true else { continue }
             if !search.contains(url.path) { search.append(url.path) }
         }

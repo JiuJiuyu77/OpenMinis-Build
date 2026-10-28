@@ -208,3 +208,15 @@ jobs:
           nm -g /tmp/runtime-process-smoke > /tmp/runtime-process-symbols.txt
           grep -q ' _minis_runtime_run_tool$' /tmp/runtime-process-symbols.txt
           grep -q ' _minis_runtime_bridge_version$' /tmp/runtime-process-symbols.txt
+      - name: Production install, extraction and probe smoke
+        run: |
+          set -euo pipefail
+          fixtures=$(mktemp -d)
+          destination=$(mktemp -d)
+          python3 scripts/tests/runtime_install_fixtures.py "$fixtures"
+          swiftc -swift-version 5 -parse-as-library \
+            src/ios/Agent/Runtime/RuntimeTarGzExtractor.swift \
+            src/ios/Agent/Runtime/RuntimeInstallSpec.swift \
+            src/ios/Agent/Runtime/RuntimeInstallVerifier.swift \
+            scripts/tests/runtime_install_smoke.swift -o /tmp/runtime-install-smoke
+          /tmp/runtime-install-smoke "$destination" "$fixtures"
