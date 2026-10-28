@@ -51,7 +51,10 @@ enum NativeSpawnIdentity {
         }
         let probe = RuntimeProbeRunner.run(executable: "/bin/sh", arguments: ["-c", "pwd; printf probe-ok"],
             environment: ProcessInfo.processInfo.environment, workingDirectory: good.path, timeout: 4)
-        require(probe.spawnError == nil && probe.status == 0 && probe.output.contains(good.path), "probe ignored working directory")
+        let reportedCWD = probe.output.components(separatedBy: "\n").first ?? ""
+        require(probe.spawnError == nil && probe.status == 0
+            && RuntimePathPolicy.canonicalURL(URL(fileURLWithPath: reportedCWD)) == RuntimePathPolicy.canonicalURL(good),
+            "probe ignored working directory: \(probe.output)")
         let timed = RuntimeProbeRunner.run(executable: "/bin/sh", arguments: ["-c", "sleep 10"],
             environment: ProcessInfo.processInfo.environment, workingDirectory: good.path, timeout: 0.1)
         require(timed.timedOut, "probe timeout did not fire")

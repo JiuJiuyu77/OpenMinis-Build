@@ -526,9 +526,8 @@ enum RuntimeTarGzExtractor {
         /// targets whose normalised form stays under the extraction root.
         private func isContainedLinkTarget(_ target: String, at parent: URL) -> Bool {
             guard !target.hasPrefix("/"), !target.contains("\0") else { return false }
-            let candidate = parent.appendingPathComponent(target)
-                .standardizedFileURL.resolvingSymlinksInPath().path
-            let root = destination.standardizedFileURL.resolvingSymlinksInPath().path
+            guard let candidate = RuntimePathPolicy.canonicalURL(parent.appendingPathComponent(target))?.path,
+                  let root = RuntimePathPolicy.canonicalURL(destination)?.path else { return false }
             return candidate == root || candidate.hasPrefix(root + "/")
         }
 

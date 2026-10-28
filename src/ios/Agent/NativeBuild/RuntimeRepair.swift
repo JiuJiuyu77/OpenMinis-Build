@@ -419,7 +419,7 @@ enum RuntimeRepair {
             let damaged = rels.contains { rel in
                 let path = dir.appendingPathComponent(rel).path
                 guard FileManager.default.fileExists(atPath: path) else { return false }
-                return runtimeBinaryDamage(path) != nil
+                return runtimeBinaryDamage(URL(fileURLWithPath: path).resolvingSymlinksInPath().path) != nil
             }
             if damaged {
                 manager.remove(id)

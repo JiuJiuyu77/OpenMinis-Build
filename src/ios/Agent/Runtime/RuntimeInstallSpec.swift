@@ -150,11 +150,35 @@ enum RuntimePathPolicy {
 
     static func containedURL(_ path: String, in root: URL) -> URL? {
         guard isRelativePath(path) else { return nil }
-        let base = root.standardizedFileURL.resolvingSymlinksInPath()
+        guard let base = canonicalURL(root) else { return nil }
         let candidate = root.appendingPathComponent(path).standardizedFileURL
-        let resolved = candidate.resolvingSymlinksInPath().path
-        guard resolved == base.path || resolved.hasPrefix(base.path + "/") else { return nil }
+        guard let resolved = canonicalURL(candidate)?.path,
+              resolved == base.path || resolved.hasPrefix(base.path + "/") else { return nil }
         return candidate
+    }
+
+    /// Foundation may leave an entire URL unresolved when its final file does
+    /// not exist. Resolve components (including dangling symlinks) explicitly;
+    /// installers routinely check a destination BEFORE creating its last leaf.
+    static func canonicalURL(_ url: URL) -> URL? {
+        var pending = url.path.split(separator: "/").map(String.init)
+        var resolved = URL(fileURLWithPath: "/", isDirectory: true)
+        var links = 0
+        while !pending.isEmpty {
+            let part = pending.removeFirst()
+            if part == "." { continue }
+            if part == ".." { resolved.deleteLastPathComponent(); continue }
+            let next = resolved.appendingPathComponent(part)
+            if let target = try? FileManager.default.destinationOfSymbolicLink(atPath: next.path) {
+                links += 1
+                guard links <= 40, !target.contains("\0") else { return nil }
+                if target.hasPrefix("/") { resolved = URL(fileURLWithPath: "/", isDirectory: true) }
+                pending = target.split(separator: "/").map(String.init) + pending
+            } else {
+                resolved = next
+            }
+        }
+        return resolved.standardizedFileURL
     }
 }
 
