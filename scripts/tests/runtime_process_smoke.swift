@@ -23,7 +23,7 @@ struct NativeToolchain {
             environment: ProcessInfo.processInfo.environment, timeout: timeout, shellOverride: "/bin/sh")
     }
     static func bridge(_ args: [String], input: Int32, output: Int32) -> Int32 {
-        var pointers = args.map { strdup($0) }
+        let pointers = args.map { strdup($0) }
         defer { for pointer in pointers { free(pointer) } }
         return pointers.withUnsafeBufferPointer {
             minisRuntimeRunTool(Int32(args.count), $0.baseAddress, input, output, output)

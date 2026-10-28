@@ -616,7 +616,7 @@ final class DeveloperRuntimeManager: ObservableObject {
             let memberFile = stagingArea
                 .appendingPathComponent("deb-data-\(UUID().uuidString)", isDirectory: false)
             defer { try? FileManager.default.removeItem(at: memberFile) }
-            try DebArchive.extract(data, from: archive, to: memberFile)
+            try DebArchive.extract(data, from: archive, to: memberFile, isCancelled: isCancelled)
 
             if DebArchive.isGzipPayload(data.name) {
                 try RuntimeTarGzExtractor.extract(memberFile, to: destination,
@@ -632,7 +632,7 @@ final class DeveloperRuntimeManager: ObservableObject {
                 let tarFile = stagingArea
                     .appendingPathComponent("deb-tar-\(UUID().uuidString)", isDirectory: false)
                 defer { try? FileManager.default.removeItem(at: tarFile) }
-                try ZstdDecompressor.decompress(memberFile, to: tarFile)
+                try ZstdDecompressor.decompress(memberFile, to: tarFile, isCancelled: isCancelled)
                 try RuntimeTarGzExtractor.extractPlainTar(tarFile, to: destination,
                                                           isCancelled: isCancelled) { p in
                     progress(p.bytesWritten, p.entriesWritten)

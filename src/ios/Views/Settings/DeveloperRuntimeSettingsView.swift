@@ -12,9 +12,6 @@ struct DeveloperRuntimeSettingsView: View {
     /// One alert for both flows: two `.alert(item:)` modifiers on the same view
     /// conflict, and the second silently replaces the first.
     @State private var pendingConfirm: ConfirmAction?
-    @State private var codexOptions: [RuntimeVersionCatalog.Option] = []
-    @State private var loadingCodexVersions = false
-    @State private var codexVersionError: String?
 
     private enum ConfirmAction: Identifiable {
         case install(RuntimeDescriptor)
@@ -78,10 +75,6 @@ struct DeveloperRuntimeSettingsView: View {
                         Text(footer)
                     }
                 }
-            }
-
-            if let codex = manager.runtimes.first(where: { $0.handler == "codex" }) {
-                codexVersionSection(codex)
             }
 
             Section {
@@ -190,82 +183,6 @@ struct DeveloperRuntimeSettingsView: View {
         default:
             return nil
         }
-    }
-
-    // MARK: - Codex 可选版本
-
-    /// 清单只发布最新版；这里从 GitHub Releases 拉历史版本，允许装旧版。
-    private func codexVersionSection(_ descriptor: RuntimeDescriptor) -> some View {
-        Section {
-            LabeledContent(AppLocalized("Installed version"),
-                           value: manager.state(for: descriptor).record?.version ?? AppLocalized("Not installed"))
-            if loadingCodexVersions {
-                HStack(spacing: 8) {
-                    ProgressView()
-                    Text(AppLocalized("Loading versions…"))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            } else if codexOptions.isEmpty {
-                Button {
-                    Task { await loadCodexVersions() }
-                } label: {
-                    Label(AppLocalized("Load available versions"), systemImage: "arrow.clockwise")
-                }
-            } else {
-                Menu {
-                    ForEach(codexOptions) { option in
-                        Button(versionTitle(option)) {
-                            installCodex(option, from: descriptor)
-                        }
-                    }
-                } label: {
-                    Label(AppLocalized("Install another version"), systemImage: "arrow.down.circle")
-                }
-            }
-            if let codexVersionError {
-                Text(verbatim: codexVersionError)
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
-            }
-            if !codexOptions.isEmpty {
-                Button(AppLocalized("Refresh version list")) {
-                    Task { await loadCodexVersions(force: true) }
-                }
-                .font(.footnote)
-            }
-        } header: {
-            Text(AppLocalized("Codex versions"))
-        } footer: {
-            Text(AppLocalized("Versions come from the runtime repository's GitHub releases. Installing one replaces the current Codex runtime only — the rest of the toolchain is untouched."))
-        }
-    }
-
-    private func loadCodexVersions(force: Bool = false) async {
-        if loadingCodexVersions { return }
-        if !force, !codexOptions.isEmpty { return }
-        loadingCodexVersions = true
-        codexVersionError = nil
-        let options = await RuntimeVersionCatalog.versions(handler: "codex")
-        codexOptions = options
-        if options.isEmpty {
-            codexVersionError = AppLocalized("Could not load the release list. Check the network or the runtime repository.")
-        }
-        loadingCodexVersions = false
-    }
-
-    private func installCodex(_ option: RuntimeVersionCatalog.Option, from descriptor: RuntimeDescriptor) {
-        let replaced = descriptor.replacingRelease(version: option.version,
-                                                   assetName: option.assetName,
-                                                   archiveURL: option.archiveURL,
-                                                   sha256: option.sha256,
-                                                   size: option.size)
-        pendingConfirm = .install(replaced)
-    }
-
-    private func versionTitle(_ option: RuntimeVersionCatalog.Option) -> String {
-        guard let date = option.publishedAt else { return option.version }
-        return option.version + " · " + date.formatted(date: .abbreviated, time: .omitted)
     }
 
     private var installedBytes: Int64 {

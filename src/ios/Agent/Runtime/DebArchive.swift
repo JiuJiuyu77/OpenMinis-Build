@@ -90,7 +90,8 @@ enum DebArchive {
     }
 
     /// Copy one member's payload out to `destination`.
-    static func extract(_ member: Member, from url: URL, to destination: URL) throws {
+    static func extract(_ member: Member, from url: URL, to destination: URL,
+                        isCancelled: () -> Bool = { false }) throws {
         let source = try FileHandle(forReadingFrom: url)
         defer { try? source.close() }
         try source.seek(toOffset: UInt64(member.offset))
@@ -102,6 +103,7 @@ enum DebArchive {
         var remaining = member.size
         let chunkSize = 1 << 20
         while remaining > 0 {
+            if isCancelled() { throw CancellationError() }
             let want = min(chunkSize, remaining)
             guard let chunk = try? source.read(upToCount: want), !chunk.isEmpty else {
                 throw DebError.truncated

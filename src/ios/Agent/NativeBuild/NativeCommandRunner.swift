@@ -78,7 +78,7 @@ enum NativeCommandRunner {
 
     /// 运行一条命令。
     /// - Parameters:
-    ///   - command: shell 脚本（会交给 shell -lc 执行）
+    ///   - command: shell 脚本（会交给 shell -c 执行，保留注入的 PATH）
     ///   - directory: 工作目录
     ///   - environment: 子进程环境
     ///   - timeout: 超时秒数（<=0 表示不限）
@@ -181,17 +181,14 @@ enum NativeCommandRunner {
                               exitCode: 126, duration: Date().timeIntervalSince(started), timedOut: false)
             }
 
-            let argv: [String] = [shell, "-lc", script]
-            let (child, rc) = await withCheckedContinuation {
-                (cont: CheckedContinuation<(pid_t, Int32), Never>) in
-                queue.async {
-                    var child: pid_t = -1
-                    let rc = runSpawn(&child, shell, argv, envPairs, &actions, &attr)
-                    posix_spawn_file_actions_destroy(&actions)
-                    posix_spawnattr_destroy(&attr)
-                    cont.resume(returning: (child, rc))
-                }
-            }
+            let argv: [String] = [shell, "-c", script]
+            // posix_spawn only starts the child; waiting/reading stay off-thread.
+            // Keep its opaque action handles on the creating task rather than
+            // capture raw pointers across a Dispatch @Sendable closure.
+            var child: pid_t = -1
+            let rc = runSpawn(&child, shell, argv, envPairs, &actions, &attr)
+            posix_spawn_file_actions_destroy(&actions)
+            posix_spawnattr_destroy(&attr)
             close(outPipe[1])
             if rc == 0 && child > 0 {
                 spawnedPid = child
@@ -358,7 +355,7 @@ enum NativeSpawnIdentity {
     }
 }
 
-private final class NativePipeReaderState {
+private final class NativePipeReaderState: @unchecked Sendable {
     private let lock = NSLock()
     private var value = false
     var stopped: Bool { lock.lock(); defer { lock.unlock() }; return value }
@@ -366,7 +363,7 @@ private final class NativePipeReaderState {
 }
 
 /// 按原始换行字节分帧，再解码完整行。无效 UTF-8 不会吞掉后续全部输出。
-private final class LineCollector {
+private final class LineCollector: @unchecked Sendable {
     private var buffer = Data()
     private var all = ""
     private let onLine: ((String) -> Void)?

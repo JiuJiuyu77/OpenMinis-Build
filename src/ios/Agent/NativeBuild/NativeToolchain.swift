@@ -245,7 +245,7 @@ struct NativeToolchain {
             let runtimeDirs = children.filter {
                 (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
             }
-            roots.append(contentsOf: runtimeDirs.filter { $0.lastPathComponent != "codex" }
+            roots.append(contentsOf: runtimeDirs.filter { !RuntimeDescriptor.isAgentIdentifier($0.lastPathComponent) }
                 .sorted { $0.lastPathComponent < $1.lastPathComponent })
         }
         roots.append(Bundle.main.bundleURL.appendingPathComponent("NativeToolchain", isDirectory: true))
@@ -280,11 +280,11 @@ struct NativeToolchain {
         var paths: [String] = []
         for root in roots {
             let id = root.lastPathComponent
-            guard id != "codex",
+            guard !RuntimeDescriptor.isAgentIdentifier(id),
                   (try? root.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
             if var descriptor = manifest?.runtimes[id] {
-                guard descriptor.handler != "codex" else { continue }
                 descriptor.id = id
+                guard descriptor.isSupportedRuntime, descriptor.installationIssue == nil else { continue }
                 let overlay = RuntimeEnvironmentOverlay.build(descriptor: descriptor, root: root)
                 exports.merge(overlay.exports) { current, _ in current }
                 paths.append(contentsOf: overlay.pathEntries)
@@ -590,7 +590,9 @@ struct NativeToolchain {
         env["LANG"] = "en_US.UTF-8"
         env["LC_ALL"] = "en_US.UTF-8"
         env["TERM"] = "dumb"
-        if let certificate = Bundle.main.url(forResource: "cacert", withExtension: "pem") {
+        let certificate = Bundle.main.url(forResource: "cacert", withExtension: "pem")
+            ?? Bundle.main.url(forResource: "cacert", withExtension: "pem", subdirectory: "Helpers")
+        if let certificate {
             for key in ["SSL_CERT_FILE", "CURL_CA_BUNDLE", "GIT_SSL_CAINFO", "NODE_EXTRA_CA_CERTS"]
                 where env[key]?.isEmpty != false {
                 env[key] = certificate.path

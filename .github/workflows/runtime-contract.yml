@@ -205,5 +205,6 @@ jobs:
             scripts/tests/runtime_process_smoke.swift -o /tmp/runtime-process-smoke
           /tmp/runtime-process-smoke
           # A link-time C caller must see both entry points (not just a parsed annotation).
-          nm -g /tmp/runtime-process-smoke | grep -q ' _minis_runtime_run_tool$'
-          nm -g /tmp/runtime-process-smoke | grep -q ' _minis_runtime_bridge_version$'
+          nm -g /tmp/runtime-process-smoke > /tmp/runtime-process-symbols.txt
+          grep -q ' _minis_runtime_run_tool$' /tmp/runtime-process-symbols.txt
+          grep -q ' _minis_runtime_bridge_version$' /tmp/runtime-process-symbols.txt

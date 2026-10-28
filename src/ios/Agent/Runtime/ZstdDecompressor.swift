@@ -144,7 +144,8 @@ enum ZstdDecompressor {
         var lastHint = 0
 
         while true {
-            guard let chunk = try? input.read(upToCount: chunkSize), !chunk.isEmpty else { break }
+            if isCancelled() { throw CancellationError() }
+            guard let chunk = try input.read(upToCount: chunkSize), !chunk.isEmpty else { break }
             try chunk.withUnsafeBytes { raw in
                 guard let base = raw.baseAddress, raw.count > 0 else { return }
                 // ZSTD_inBuffer { const void *src; size_t size; size_t pos; }
@@ -156,6 +157,7 @@ enum ZstdDecompressor {
                 inStorage.storeBytes(of: 0, toByteOffset: 16, as: Int.self)
 
                 while true {
+                    if isCancelled() { throw CancellationError() }
                     let pos = inStorage.load(fromByteOffset: 16, as: Int.self)
                     if pos >= raw.count { break }
 
