@@ -20,20 +20,24 @@ on:
     paths:
       - "scripts/check_runtime_manifest.py"
       - "src/ios/Agent/Runtime/**"
+      - "src/ios/Agent/NativeBuild/**"
       - "src/ios/Views/Settings/DeveloperRuntimeSettingsView.swift"
+      - "scripts/stage_app_helpers.sh"
       - ".github/workflows/runtime-contract.yml"
   pull_request:
     paths:
       - "scripts/check_runtime_manifest.py"
       - "src/ios/Agent/Runtime/**"
+      - "src/ios/Agent/NativeBuild/**"
       - "src/ios/Views/Settings/DeveloperRuntimeSettingsView.swift"
+      - "scripts/stage_app_helpers.sh"
       - ".github/workflows/runtime-contract.yml"
 
 permissions:
   contents: read
 
 env:
-  MANIFEST_URL: https://raw.githubusercontent.com/JiuJiuyu77/CodexApp-Runtime/main/Runtime/runtime-manifest.json
+  MANIFEST_URL: https://raw.githubusercontent.com/JiuJiuyu77/MinisApp-Runtime/main/Runtime/runtime-manifest.json
 
 jobs:
   manifest:
@@ -69,7 +73,10 @@ jobs:
 
   swift-syntax:
     name: Runtime sources parse
-    runs-on: ubuntu-latest
+    # ubuntu-latest rolled to 26.04, which swift-actions/setup-swift does not
+    # support yet ("Version 26.04 of Ubuntu is not supported"). Pin the runner
+    # instead of chasing the alias.
+    runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -83,14 +90,57 @@ jobs:
           set -euo pipefail
           swiftc -version
           swiftc -parse src/ios/Agent/Runtime/*.swift
-          swiftc -parse src/ios/Views/Settings/DeveloperRuntimeSettingsView.swift
+          swiftc -parse src/ios/Agent/NativeBuild/IPAShellPacker.swift \
+                        src/ios/Agent/NativeBuild/NativeBuildService.swift
+          swiftc -parse src/ios/Views/Settings/DeveloperRuntimeSettingsView.swift \
+                        src/ios/Views/Settings/RuntimeDiagnosticsView.swift \
+                        src/ios/Views/Settings/ToolExecutorSettingsView.swift
+          swiftc -parse src/ios/Agent/NativeBuild/ToolExecutorPreference.swift \
+                        src/ios/Agent/NativeBuild/NativeToolchain.swift
           echo "runtime sources parse cleanly"
 
-      - name: Self-check plumbing is wired
+      - name: Install gates are wired
         run: |
           set -euo pipefail
-          # 这三处是本 branch 的适配点，被回退时立刻可见。
+          # 这几处是适配点，被回退时立刻可见：
+          #   自检 → 签名 → 环境 overlay → 能力级依赖
           grep -q "RuntimeInstallVerifier.verify" src/ios/Agent/Runtime/DeveloperRuntimeManager.swift
+          grep -q "RuntimeSigner.signRuntime" src/ios/Agent/Runtime/DeveloperRuntimeManager.swift
           grep -q "RuntimeEnvironmentOverlay.build" src/ios/Agent/Runtime/DeveloperRuntimeManager.swift
           grep -q "installSpecOrNone" src/ios/Agent/Runtime/RuntimeManifest.swift
-          echo "self-check + environment overlay are wired into the manager"
+          grep -q "codex-sign" src/ios/Agent/Runtime/RuntimeSigning.swift
+          grep -q "RuntimeSigner.signArtifacts" src/ios/Agent/NativeBuild/IPAShellPacker.swift
+          grep -q "RuntimeSigner.signArtifacts" src/ios/Agent/NativeBuild/NativeBuildService.swift
+          grep -q "CapabilityID.nodeRuntime" src/ios/Agent/Runtime/BuiltinCapabilities.swift
+          grep -q "unsupportedHandlers" src/ios/Agent/Runtime/DeveloperRuntimeManager.swift
+          grep -q "nativeLayers" src/ios/Views/Settings/RuntimeDiagnosticsView.swift
+          grep -q "RuntimeSigner.locateCodexSign" src/ios/Views/Settings/RuntimeDiagnosticsView.swift
+          # 借来的运行时目录必须保持删除状态（回归守卫）：
+          if grep -rq "nativeToolchain.reuseExternalRuntime\|toolExecutor.preferCustomRuntime" src/ios --include=*.swift; then
+            echo "borrowed-runtime switch is back in the executor" >&2
+            exit 1
+          fi
+          echo "self-check + signing + environment overlay are wired into the manager"
+
+      - name: Localization coverage report
+        run: |
+          set -euo pipefail
+          python3 scripts/check_localization_keys.py | tail -5
+
+      - name: Shell scripts parse
+        run: |
+          set -euo pipefail
+          bash -n scripts/stage_app_helpers.sh
+          echo "stage_app_helpers.sh parses"
+
+      - name: Helper staging is a no-op without binaries
+        run: |
+          set -euo pipefail
+          # 没有 Configs/Helpers 时，构建阶段脚本必须安静退出而不是失败。
+          products=$(mktemp -d)
+          out=$(BUILT_PRODUCTS_DIR="$products" WRAPPER_NAME=Minis.app bash scripts/stage_app_helpers.sh)
+          echo "$out"
+          case "$out" in
+            *"nothing to stage"*) echo "ok: no-op path works" ;;
+            *) echo "unexpected output" >&2; exit 1 ;;
+          esac

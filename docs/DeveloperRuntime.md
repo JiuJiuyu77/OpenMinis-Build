@@ -72,22 +72,37 @@ swiftc -typecheck \
 
 ## 执行器（Executor）与能力注册表
 
-这三个开关位于 `设置 → 执行器（Executor）`：
+这两个开关位于 `设置 → 执行器（Executor）`：
 
 | 开关 | 存储键 | 行为 |
 |---|---|---|
-| 默认执行器 | `toolExecutor.mode` | `auto`（默认，留在 iSH）/ `sandbox` / `native` |
+| 默认执行器 | `toolExecutor.mode` | `auto`（默认）/ `sandbox` / `native` |
 | 沙箱模式 | `toolExecutor.sandboxMode` | 强制只走 iSH，覆盖上面的选择 |
-| 优先使用自定义 Runtime | `toolExecutor.preferCustomRuntime` | 让 `auto` 改用 Developer Runtime 装的工具链；同时让 `NativeToolchain` 优先探测 `Application Support/DeveloperRuntime/installed` |
 
-`auto` 刻意**不会**因为“存在工具链”就改走原生：MT-Agent 的安装里本来就有一份工具链，
-那样会让所有命令静默离开 iSH 沙箱。原生执行必须显式开启。
+`auto` 只有在「设备原生二进制可执行」**且**「本 App 装的工具链可用」时才走原生，
+其余情况留在 iSH；真正执行前还有一次真实启动探针，失败会自动回退并说明原因。
+
+### 删掉的两个开关（`preferCustomRuntime` / `reuseExternalRuntime`）
+
+运行时来源收敛成**一条**之后，这两个开关描述的取舍已经不存在：
+
+- `preferCustomRuntime`（优先使用自定义 Runtime）—— 以前要在「Developer Runtime 装的」
+  与「MT-Agent / CodexApp 共用的一份」之间选；现在只有前者 + 手动路径。
+- `reuseExternalRuntime`（复用外部运行时）—— 复用别的 App 的运行时目录是本项目早期的
+  权宜之计。那条路在沙箱构建里 mmap 不了对方的 dylib，还会把「没装 Theos」显示成
+  「已就绪」。现在运行时由本 App 自己安装、**自检**（`RuntimeInstallVerifier`）并
+  **签名**（`RuntimeSigner`，ldid + codex-sign），借别人的目录只剩坏处。
+
+所以 `NativeToolchain.candidateRoots()` 现在只扫：手动路径 → `DeveloperRuntime/installed/*`
+→ App 内置 `NativeToolchain/` → `Application Support/NativeToolchain/`；
+`/var/mobile/Library/Application Support/CodexApp/...` 这些路径已从代码里删除。
+旧的 UserDefaults 键留着不读也不写（无害），升级后不会因为残留值改变行为。
 
 相关文件：
 
 | 文件 | 职责 |
 |---|---|
-| `src/ios/Agent/NativeBuild/ToolExecutorPreference.swift` | 三个开关 + `executionDecision` 快照 |
+| `src/ios/Agent/NativeBuild/ToolExecutorPreference.swift` | 两个开关 + `executionDecision` 快照 |
 | `src/ios/Views/Settings/ToolExecutorSettingsView.swift` | 设置页与只读能力列表 |
 | `src/ios/Agent/Chat/AIChatViewModel+ISHCommand.swift` | `shell_execute` 按决策分流；`/var/minis/…` 始终留在沙箱 |
 
@@ -267,3 +282,135 @@ probe 输出会被截断到 4KB 并写进日志与设置页，便于区分「包
    `sign_paths` 越界、环境值缺 `${RUNTIME_ROOT}`）、摘要为 64 位小写 hex；
 2. **swift-syntax** —— Ubuntu + Swift 6，`swiftc -parse` 解析 Runtime 目录与设置页
    （只校验语法，不需要 iOS SDK），并断言自检与 overlay 仍接在管理器上。
+
+## 三层执行链：shell / 工具链 / 签名（本分支补齐签名层）
+
+要在真机上真正编译并运行原生二进制，三层缺一不可。前两层本分支之前就已经存在，
+这一轮补的是第三层。
+
+| 层 | 组成 | 状态 | 代码位置 |
+|---|---|---|---|
+| 1. 执行层 | `Helpers/bash.real`（真 bash，Darwin syscall + `posix_spawn`），不是 iSH 里的 Linux busybox | 已有（找不到时依次回退 `/var/jb/usr/bin/bash`、`/bin/bash`、`/bin/sh`，并在 `Helpers/`、`TheosCompat/`、`TheosCoreCompat/` 里补 coreutils 别名） | `NativeBuild/NativeToolchain.swift`、`NativeBuild/NativeCommandRunner.swift` |
+| 2. 工具层 | Theos 运行时：`clang-16`、`ld64`、`ar`、`strip`、`ldid`、`dpkg-deb`、`iPhoneOS16.5.sdk`、makefiles/headers/lib | 已有（真机 arm64 编译，不交叉模拟） | `Runtime/DeveloperRuntimeManager.swift`、`NativeBuild/NativeToolchain.swift` |
+| 3. 签名层 | `ldid -S<entitlements>` 写权限 → `codex-sign` 补 App Store 形态 CodeDirectory（TeamID + cdhashes） | **本分支新增** | `Runtime/RuntimeSigning.swift` |
+
+### 为什么必须两步
+
+只做 `ldid` 是「签名残缺」：`posix_spawn` 可能过得去，但一执行就被杀，表现为
+`Bad executable` 或 `Killed: 9` —— AMFI 不认这个签名结构。`codex-sign` 在 adhoc
+签名之上重写签名 superblob：Thin/FAT 归一到 arm64、补 cdhashes、设置 TeamID，并走
+TrollStore 的 CoreTrust 绕过路径。
+
+### 权限来源（不硬编码一份 plist）
+
+`RuntimeSigner.entitlementsPlist()` 从**本进程自身签名**里挑出可传播的这 8 条：
+
+`platform-application`、`com.apple.private.security.no-sandbox`、
+`com.apple.private.security.no-container`、
+`com.apple.private.security.storage.AppBundles`、
+`com.apple.private.security.storage.AppDataContainers`、
+`task_for_pid-allow`、`get-task-allow`、`proc_info-allow`
+
+`Configs/TrollStore.entitlements` 里这些已经都在（另外还有
+`com.apple.private.skip-library-validation`，用于让 dyld 接受 CDHash 与主程序不同的
+运行时二进制）。App 本身不是以这些权限签名时（App Store / 普通侧载），签出来的东西
+也没有意义——signer 直接返回 `skipped`，不会假装成功。
+
+### 装完自动签名
+
+`DeveloperRuntimeManager` 在自检通过后备好 `install.sign_paths`（带权限）与
+`install.sign_paths_without_entitlements`（adhoc-only），逐个：
+
+1. `ldid -S<tmp>/entitlements.plist <file>`
+2. `codex-sign [--entitlements plist] <file>`
+
+结论落在安装记录里（`RuntimeSignReport`），设置页显示 `Signed (ldid + codex-sign)`、
+`Ad-hoc signed only`、`Signing skipped`、`Signing failed` 四种之一。签名失败会让安装
+失败并保留上一份可用的运行时——一个「装了但执行即崩」的工具链比没有更糟。
+
+### 把 bash.real / codex-sign 放进包
+
+`Helpers/` 目前不在 Xcode 工程里，需要一次构建配置（不是代码改动）：
+
+1. 把 `bash.real`、`codex-sign`（可选 `ca-filetool`、`ldid`）放到 `Configs/Helpers/`；
+2. 在 Minis target 里加一个 Run Script 构建阶段（放在签名阶段之前）：
+   `"${SRCROOT}/scripts/stage_app_helpers.sh"`；
+3. 脚本会把文件复制到 `<App>.app/Helpers/`、补 `bash`/`sh`/coreutils 软链，并用当前
+   签名身份对副本做一次 adhoc 签名（`Configs/Helpers/` 为空时整体 no-op，不影响普通构建）。
+
+`codex-sign` 没进包也能跑：signer 会退化成 `Ad-hoc signed only` 并在记录里写明原因；
+也可以把 `codex-sign` 放到 `Application Support/DeveloperRuntime/Helpers/codex-sign`，
+不重新打包即生效。
+
+## 为什么不安装 Codex 运行时
+
+运行时清单里的 `codex` 条目（`codex.cli` / `codex.app-server` / `codex.code-mode`）
+是**另一套 App 的 AI 执行层**：它把自己的 agent、app-server 协议与 Code Mode Host
+一起打成一个 rootless deb。Minis 有自己的 Agent 架构（工具循环、会话、能力注册表都在
+本仓库内），接管别人的 agent 运行时既没有必要，也会把两套协议混在一起。
+
+因此：
+
+- `DeveloperRuntimeManager.unsupportedHandlers = ["codex"]` —— 列表、安装、能力都不出现；
+- `install(_:)` 里加了防御：即使把自定义清单地址指向含 `codex` 的清单，也不会装；
+- `scripts/check_runtime_manifest.py` 把 `codex` 放进 `IGNORED_HANDLERS`，只做形状校验，
+  不因为「装不了」报错；同时不再把 `codex.cli` 当作必需能力。
+
+**采纳**的是工具链类运行时：`theos`（clang/ld64/ldid/dpkg-deb/SDK）、`ollvm`、
+`node`、`python`、`core_tools`、`build_tools`、`reverse_tools` —— 这些是「在真机上编译
+与打包」的通用能力，与谁的 AI 层无关。
+
+顺带说明一个名词：`Helpers/codex-sign` 里的 “codex” 与 Codex AI 无关，它是 TrollStore
+血统的签名工具名（补 App Store 形态 CodeDirectory），本分支的签名层用的就是它。
+
+### 产物签名（不只是运行时）
+
+同一条签名链也用在构建产物上，否则「编译成功」和「能跑」之间仍然断一截：
+
+| 场景 | 处理 |
+|---|---|
+| `product == .dylib` | 编完立刻 `ldid` + `codex-sign`，日志里 `已签名 dylib`；缺工具时如实写 `dylib 未完整签名` |
+| `product == .ipaShell` | 注入会清掉原签名，打壳收尾对**主二进制 + 注入的 dylib** 重签；成功则结论文案变成「打壳成功（已重签）」，失败/不可用时仍标「需要重签」并写明原因 |
+
+`RuntimeSigner.signArtifacts(paths:)` 是这两个场景的共用入口：不依赖清单条目，
+按 Mach-O 过滤（脚本/软链自动跳过），签名深度与装运行时完全一致。
+
+### 能力注册：装了什么就能查什么
+
+`CapabilityRegistry` 新增 5 个与清单 `provides` **同名**的能力 id（不另造别名）：
+
+`node.javascript`、`python.runtime`、`core.git`、`build.cmake`、`reverse.radare2`
+
+判定来源只有一个：`DeveloperRuntimeManager.installedCapabilities`（来自安装记录的
+`provides`）。因此设置页 / `native_build` / 能力页问的是同一个真相，不会出现
+「Developer Runtime 显示已装、能力页说不可用」。
+
+## 运行时诊断：从「装没装」到「跑不跑得起来」
+
+`设置 › 运行时诊断` 原来只能回答「文件在不在」。运行时链变成 shell → 工具链 → 签名
+三层之后，这种回答不够用了：一份文件齐全但没签名、或签了名但子进程拿不到权限的工具链，
+在诊断页上全是绿的，一编译就 `Killed: 9`。
+
+新增分组 **Native execution (3 layers)**，五项都是**真跑**，不是查表：
+
+| 检查项 | 做法 | 判定 |
+|---|---|---|
+| 子进程身份 | 用运行时 shell 跑 `id -u; id -g; uname -m` | uid 必须是 0，否则报「子进程不是 root」 |
+| 文件系统边界 | 依次尝试在 `/tmp`、`/var/mobile/Library`、`/var/mobile/Media` 落文件，再尝试写 `/`、`/System/Library` | 前三个必须可写；后两个必须**不可写**（SSV 封签）；反过来可写才是异常 |
+| TCC 边界 | 尝试 `head -c 1` 读取短信、通话、TCC 数据库 | 三个都必须被拒；能读才是问题 |
+| 签名层 | `RuntimeSigner.locateLdid()` / `locateCodexSign()` / `entitlementsPlist()` | 二者齐备且有可传播 entitlements 才算 ok；缺 codex-sign 降级为 skipped 并说明只能 adhoc |
+| 运行时自检 | 逐条读安装记录里的 `verification` / `signing` | 任一条 failed 即红；旧记录（没有这两个字段）标注「早于自检机制安装」 |
+
+这几项对应 MT 实测的那组事实：`uid=0 gid=0`、可写 `/tmp`·`Library`·`Media`、可枚举其它
+App 的 Data 容器、不可写 `/` 与 `/System/Library`、不可读 SMS / CallHistoryDB / TCC。
+诊断页现在能把它们逐条摆出来，而不是让用户从一次失败的编译里猜。
+
+## 本地化
+
+本分支新增的 UI 字符串已全部落进 `Localizable.xcstrings`（zh-Hans）：
+
+- `scripts/add_runtime_localization.py` —— 本次用的插入器：按条目风格**文本插入**，
+  不重新序列化 28 万行文件（`add_localization.py` 解析不了当前格式，直接 reserialize
+  会把真实改动埋进 diff 噪声里）。
+- `scripts/check_localization_keys.py` —— 扫描 `AppLocalized("…")` 与目录比对。
+  默认只报告（main 上本来就有约 24 个历史缺口），加 `--strict` 才作为闸门用。

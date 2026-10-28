@@ -48,6 +48,36 @@ struct BuiltinCapabilities: CapabilityProviding {
                 requires: [CapabilityID.iosToolchain],
                 summary: AppLocalized("Protected compilation passes on top of the toolchain.")),
             CapabilityDescriptor(
+                id: CapabilityID.nodeRuntime,
+                displayName: AppLocalized("Node.js runtime"),
+                kind: .toolchain,
+                requires: [CapabilityID.nativeExecution],
+                summary: AppLocalized("Node with npm/corepack from the Developer Runtime manifest.")),
+            CapabilityDescriptor(
+                id: CapabilityID.pythonRuntime,
+                displayName: AppLocalized("Python runtime"),
+                kind: .toolchain,
+                requires: [CapabilityID.nativeExecution],
+                summary: AppLocalized("Managed CPython from the Developer Runtime manifest.")),
+            CapabilityDescriptor(
+                id: CapabilityID.coreTools,
+                displayName: AppLocalized("Core tools (git/rg/curl/jq)"),
+                kind: .toolchain,
+                requires: [CapabilityID.nativeExecution],
+                summary: AppLocalized("Git, ripgrep, curl and jq from the CoreTools runtime.")),
+            CapabilityDescriptor(
+                id: CapabilityID.buildTools,
+                displayName: AppLocalized("CMake + Ninja"),
+                kind: .toolchain,
+                requires: [CapabilityID.nativeExecution],
+                summary: AppLocalized("CMake and Ninja from the BuildTools runtime.")),
+            CapabilityDescriptor(
+                id: CapabilityID.reverseTools,
+                displayName: AppLocalized("Reverse tools (radare2)"),
+                kind: .toolchain,
+                requires: [CapabilityID.nativeExecution],
+                summary: AppLocalized("radare2 and Mach-O tooling from the ReverseTools runtime.")),
+            CapabilityDescriptor(
                 id: CapabilityID.workspaceFiles,
                 displayName: AppLocalized("Workspace files"),
                 kind: .filesystem,
@@ -119,6 +149,16 @@ struct BuiltinCapabilities: CapabilityProviding {
             }
             return .missing(id,
                             reason: AppLocalized("Install the OLLVM runtime from Settings → Developer Runtime."),
+                            provider: provider)
+
+        case CapabilityID.nodeRuntime, CapabilityID.pythonRuntime, CapabilityID.coreTools,
+             CapabilityID.buildTools, CapabilityID.reverseTools:
+            // 清单里 provides 的名字就是能力 id：装了（且通过自检/签名）即算可用。
+            if DeveloperRuntimeManager.shared.installedCapabilities.contains(id) {
+                return .ok(id, provider: provider)
+            }
+            return .missing(id,
+                            reason: AppLocalized("Install it from Settings → Developer Runtime."),
                             provider: provider)
 
         case CapabilityID.workspaceFiles:

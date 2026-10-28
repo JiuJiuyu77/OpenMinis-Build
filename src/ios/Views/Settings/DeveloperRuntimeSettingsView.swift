@@ -286,6 +286,9 @@ struct DeveloperRuntimeSettingsView: View {
             if let report = manager.verification(for: descriptor.id) {
                 LabeledContent("Self-check", value: report.shortSummary)
             }
+            if let signing = manager.signingReport(for: descriptor.id) {
+                LabeledContent("Signing", value: signing.shortSummary)
+            }
         } header: {
             Text("Installed")
         } footer: {

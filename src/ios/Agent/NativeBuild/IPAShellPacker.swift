@@ -8,7 +8,8 @@
 //  （`product == .dylib`），所以这一步天然接在编译之后。
 //
 //  两件事必须说清楚，不能假装成功：
-//    1. 注入会让原签名失效 → 必须用 ldid 重签（本函数不签，交给用户/CI）；
+//    1. 注入会让原签名失效 → 打壳收尾就地用 ldid + codex-sign 重签；
+//       工具不可用时明确标成 needsResign，交给用户/CI；
 //    2. 注入需要 Load Command 区有空隙 → 没有空隙时明确报错，而不是产出
 //       一个装上去就闪退的包。
 //
@@ -47,6 +48,8 @@ enum IPAShellPacker {
         let executable: String
         let injectedDylib: String
         let needsResign: Bool
+        /// 注入后的签名结论：ldid + codex-sign 成功时 needsResign 为 false。
+        let signing: RuntimeSignReport?
     }
 
     /// Inject `dylib` into `sourceIPA` and write a new ipa to `output`.
@@ -111,6 +114,23 @@ enum IPAShellPacker {
             throw ShellError.injectFailed(error.localizedDescription)
         }
 
+        // 注入清掉了原签名，就地补回去：ldid 写 entitlements，codex-sign 补
+        // App Store 形态的 CodeDirectory（只做 ldid 会被 AMFI 杀掉）。
+        // 工具不可用时保持 needsResign = true，并把原因写进日志，不假装签好。
+        let signing = RuntimeSigner.signArtifacts(paths: [executable, dylibTarget])
+        var needsResign = true
+        switch signing.status {
+        case .signed:
+            needsResign = false
+            onLog("▸ 已重签主二进制与注入的 dylib（ldid + codex-sign，\(signing.signedCount) 个）")
+        case .adhocOnly:
+            onLog("⚠️ 只做了 adhoc 签名（缺 codex-sign）：安装后可能被 AMFI 杀掉（Bad executable / Killed: 9）。")
+        case .skipped:
+            onLog("⚠️ 未重签：\(signing.reason ?? AppLocalized("signing unavailable"))")
+        case .failed:
+            onLog("⚠️ 重签失败：\(signing.reason ?? "")")
+        }
+
         // Repackage.
         onLog("▸ 重新打包…")
         try? fm.removeItem(at: output)
@@ -138,7 +158,8 @@ enum IPAShellPacker {
         logger.notice("IPA shell packed: \(output.lastPathComponent), dylib=\(dylib.lastPathComponent)")
 
         return Outcome(ipa: output, appPath: app.path, executable: executable.path,
-                       injectedDylib: dylibTarget.path, needsResign: true)
+                       injectedDylib: dylibTarget.path, needsResign: needsResign,
+                       signing: signing)
     }
 
     /// Newest `.dylib` under `projectPath` (prefers `.theos/obj`, falls back

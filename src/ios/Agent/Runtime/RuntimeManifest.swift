@@ -203,10 +203,10 @@ struct RuntimeManifest: Codable {
 
 enum RuntimeManifestLoader {
 
-    /// 运行时清单地址：默认指向本项目的运行时仓库（JiuJiuyu77/CodexApp-Runtime）。
+    /// 运行时清单地址：默认指向本项目的运行时仓库（JiuJiuyu77/MinisApp-Runtime）。
     /// 设置 → 运行时诊断 里可以覆盖成任意镜像/自建仓库，不必重新编译。
     static let defaultURL = URL(string:
-        "https://raw.githubusercontent.com/JiuJiuyu77/CodexApp-Runtime/main/Runtime/runtime-manifest.json")!
+        "https://raw.githubusercontent.com/JiuJiuyu77/MinisApp-Runtime/main/Runtime/runtime-manifest.json")!
 
     /// 用户自定义清单地址（设置 → 运行时诊断 → 运行时清单地址）。
     static let overrideURLKey = "developerRuntime.manifestURLOverride"

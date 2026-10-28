@@ -88,12 +88,6 @@ struct NativeToolchain {
             title: AppLocalized("Manual path"),
             detail: manual ?? AppLocalized("Not set"),
             ok: manual != nil))
-        lines.append(.init(
-            title: AppLocalized("Reuse external runtime"),
-            detail: Self.reuseExternalRuntime
-                ? AppLocalized("On — MT-Agent / CodexApp directories are scanned")
-                : AppLocalized("Off — only runtimes installed in this app are used"),
-            ok: true))
 
         var hitRoot: String?
         for root in roots {
@@ -155,19 +149,6 @@ struct NativeToolchain {
     /// 1. App 内置 `NativeToolchain/`（把运行时随包分发时用）
     /// 2. App 容器 `Library/Application Support/NativeToolchain/`
     /// 3. MT 智能体已下载的运行时（与 MT 共用一份，省 224MB）
-    /// 用户是否要求「优先使用自定义 Runtime」。直接读 UserDefaults 而不是
-    /// ToolExecutorPreference，因为这里是 nonisolated 的静态探测路径，
-    /// 可能从后台队列被调用。
-    static var prefersCustomRuntime: Bool {
-        UserDefaults.standard.bool(forKey: "toolExecutor.preferCustomRuntime")
-    }
-
-    /// 是否扫描其它 App（MT-Agent / CodexApp）的运行时目录。默认关闭。
-    /// 那些目录在沙箱构建里 mmap 不了，却会让「未安装 Theos」显示为已就绪。
-    static var reuseExternalRuntime: Bool {
-        UserDefaults.standard.bool(forKey: "nativeToolchain.reuseExternalRuntime")
-    }
-
     /// 用户手动指定的工具链根目录（设置 → 执行器 → 工具链 → 手动指定）。
     /// 探测失败时的兜底：不猜布局，直接用用户给的路径。
     static let manualRootKey = "nativeToolchain.rootOverride"
@@ -189,29 +170,46 @@ struct NativeToolchain {
         }
     }
 
-    /// MT 智能体在设备上的运行时目录（本 App 会复用这一份，省 224MB）。
-    private static let mtRuntimeRoots = [
-        "/var/mobile/Library/Application Support/CodexApp/PreparedRuntimes",
-        "/var/mobile/Library/Application Support/CodexApp/RuntimeDownloads/Theos",
-        "/var/mobile/Library/Application Support/CodexApp/RuntimeDownloads",
-        "/var/mobile/Library/Application Support/CodexApp/ManagedRuntime",
-    ]
+    /// 候选根目录，按优先级：
+    /// 1. App 内置 `NativeToolchain/`（把运行时随包分发时用）
+    /// 2. App 容器 `Library/Application Support/NativeToolchain/`
+    /// 3. MT 智能体已下载的运行时（与 MT 共用一份，省 224MB）
+    /// 用户手动指定的工具链根目录（设置 → 执行器 → 工具链 → 手动指定）。
+    /// 探测失败时的兜底：不猜布局，直接用用户给的路径。
+    static let manualRootKey = "nativeToolchain.rootOverride"
+
+    static var manualRootPath: String? {
+        get {
+            let raw = UserDefaults.standard.string(forKey: manualRootKey)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return raw.isEmpty ? nil : raw
+        }
+        set {
+            let trimmed = (newValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                UserDefaults.standard.removeObject(forKey: manualRootKey)
+            } else {
+                UserDefaults.standard.set(trimmed, forKey: manualRootKey)
+            }
+            shared.resetCache()
+        }
+    }
 
     /// 候选根目录，按优先级：
     /// 0. 用户手动指定的路径（诊断失败时的兜底）
-    /// 1. Developer Runtime 已安装的那份（勾了「优先使用自定义 Runtime」时提前）
+    /// 1. Developer Runtime 已安装的运行时（每个子目录都是一个独立根）
     /// 2. App 内置 `NativeToolchain/`
     /// 3. App 容器 `Library/Application Support/NativeToolchain/`
-    /// 4. MT 智能体的运行时目录（`PreparedRuntimes/*`、`RuntimeDownloads/*`）
+    ///
+    /// 不再扫别的 App（MT-Agent / CodexApp）的运行时目录：本 App 装的运行时
+    /// 自己自检、自己签名，借对方的目录只会带来 mmap 失败与假「已就绪」。
     static func candidateRoots() -> [URL] {
         var roots: [URL] = []
         if let manual = manualRootPath {
             roots.append(URL(fileURLWithPath: manual, isDirectory: true))
         }
-        // [T-developer-runtime-prefer] 用户在设置里勾了「优先使用自定义
-        // Runtime」时，Developer Runtime 装的那份排在最前面，优先于下面
-        // MT-Agent 共用的那份。`installed/` 下每个运行时都是独立子目录，
-        // 必须逐个子目录进候选，否则只扫到 `installed` 这一层就停了。
+        // `installed/` 下每个运行时都是独立子目录，必须逐个子目录进候选，
+        // 否则只扫到 `installed` 这一层就停了。
         let installed = FileManager.default.urls(for: .applicationSupportDirectory,
                                                  in: .userDomainMask).first?
             .appendingPathComponent("DeveloperRuntime/installed", isDirectory: true)
@@ -222,36 +220,12 @@ struct NativeToolchain {
             let runtimeDirs = children.filter {
                 (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
             }
-            if prefersCustomRuntime {
-                roots.append(contentsOf: runtimeDirs)
-                roots.append(installed)
-            } else {
-                roots.append(contentsOf: runtimeDirs)
-            }
+            roots.append(contentsOf: runtimeDirs)
         }
         roots.append(Bundle.main.bundleURL.appendingPathComponent("NativeToolchain", isDirectory: true))
         if let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
             roots.append(support.appendingPathComponent("NativeToolchain", isDirectory: true))
-            roots.append(support.appendingPathComponent("CodexApp", isDirectory: true))
         }
-        // MT / CodexApp 的运行时目录默认不扫（见 reuseExternalRuntime）。
-        // 用户明确勾选「复用外部运行时」后才作为候选。
-        if reuseExternalRuntime {
-            for path in mtRuntimeRoots {
-                let url = URL(fileURLWithPath: path, isDirectory: true)
-                roots.append(url)
-                // `PreparedRuntimes` 下同样是一层运行时子目录。
-                let children = (try? FileManager.default.contentsOfDirectory(
-                    at: url, includingPropertiesForKeys: [.isDirectoryKey],
-                    options: [.skipsHiddenFiles])) ?? []
-                roots.append(contentsOf: children.filter {
-                    (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
-                })
-            }
-        }
-        roots.append(URL(fileURLWithPath: "/var/mobile/Library/Application Support/NativeToolchain"))
-        // 去重，避免同一路径被 BFS 扫两次。
-        var seen = Set<String>()
         return roots.filter { seen.insert($0.standardizedFileURL.path).inserted }
     }
 
@@ -360,7 +334,6 @@ struct NativeToolchain {
                 candidates.append(root.appendingPathComponent(rel))
             }
         }
-        candidates.append(URL(fileURLWithPath: "/var/mobile/Library/Application Support/CodexApp/Helpers/bash.real"))
         candidates.append(URL(fileURLWithPath: "/var/jb/usr/bin/bash"))
         candidates.append(URL(fileURLWithPath: "/var/jb/usr/bin/zsh"))
         candidates.append(URL(fileURLWithPath: "/bin/sh"))
@@ -617,15 +590,6 @@ struct NativeToolchain {
                 ($0.lastPathComponent.contains("ollvm") ? 0 : 1) <
                 ($1.lastPathComponent.contains("ollvm") ? 0 : 1)
             })
-        }
-        for path in Self.mtRuntimeRoots {
-            let url = URL(fileURLWithPath: path, isDirectory: true)
-            roots.append(url)
-            if let children = try? fm.contentsOfDirectory(at: url,
-                                                          includingPropertiesForKeys: nil,
-                                                          options: [.skipsHiddenFiles]) {
-                roots.append(contentsOf: children)
-            }
         }
         // 运行时自带的编译器也算候选（有些包把 OLLVM 直接换成了默认 clang）。
         if let root = theosRoot {

@@ -52,6 +52,8 @@ struct InstalledRuntimeRecord: Codable, Equatable {
     /// 装完那一刻按清单 `install` 块做的自检结论。
     /// 旧记录没有这个字段（新增为可选），解码时按 nil 处理。
     var verification: RuntimeVerificationReport?
+    /// 装完之后的分发签名结论（ldid → codex-sign）。
+    var signing: RuntimeSignReport?
 }
 
 enum RuntimeInstallState: Equatable {
@@ -148,7 +150,22 @@ final class DeveloperRuntimeManager: ObservableObject {
 
     // MARK: - Manifest
 
-    var runtimes: [RuntimeDescriptor] { manifest?.orderedRuntimes ?? [] }
+    /// 故意**不安装**的 handler。
+    ///
+    /// 清单里的 `codex` 条目是另一套 App 的 AI 执行层（Codex CLI / app-server /
+    /// Code Mode Host）。Minis 有自己的 Agent 架构，不接管别人的 agent 运行时：
+    /// 这里只消费工具链类运行时（Theos / OLLVM / Node / Python / CoreTools /
+    /// ReverseTools），codex 条目在列表里连显示都不该出现，免得用户装一个
+    /// 与本 App 无关的 100MB deb。
+    static let unsupportedHandlers: Set<String> = ["codex"]
+
+    /// 本 App 会展示与安装的运行时：清单顺序减去不采纳的 handler。
+    var runtimes: [RuntimeDescriptor] {
+        (manifest?.orderedRuntimes ?? []).filter { descriptor in
+            guard let handler = descriptor.handler else { return true }
+            return !Self.unsupportedHandlers.contains(handler)
+        }
+    }
 
     func loadManifestIfNeeded() async {
         guard manifest == nil, !isLoadingManifest else { return }
@@ -222,6 +239,11 @@ final class DeveloperRuntimeManager: ObservableObject {
         records[id]?.verification
     }
 
+    /// 安装记录里的签名结论。
+    func signingReport(for id: String) -> RuntimeSignReport? {
+        records[id]?.signing
+    }
+
     /// 按 id 取清单条目（含字典键回填的 id）。
     func descriptor(id: String) -> RuntimeDescriptor? {
         runtimes.first { $0.id == id }
@@ -275,6 +297,11 @@ final class DeveloperRuntimeManager: ObservableObject {
     func install(_ descriptor: RuntimeDescriptor) {
         let id = descriptor.id
         guard tasks[id] == nil else { return }
+        if let handler = descriptor.handler, Self.unsupportedHandlers.contains(handler) {
+            // 防御：清单即使直接塞进来（例如自定义清单地址），也不给装。
+            errors[id] = AppLocalized("This runtime belongs to another app's agent stack and is not installed by Minis.")
+            return
+        }
         guard descriptor.installableArchive else {
             errors[id] = AppLocalized("This runtime uses an archive format the installer cannot unpack (supported: tar.gz and .deb with data.tar.gz / data.tar.zst).")
             return
@@ -458,6 +485,17 @@ final class DeveloperRuntimeManager: ObservableObject {
                 parts.isEmpty ? AppLocalized("Runtime self-check failed.") : parts.joined(separator: " — "))
         }
 
+        // 3.6 签名：ldid 写 entitlements，再让 codex-sign 补 App Store 形态的
+        // CodeDirectory。运行时里全是 Mach-O，只做 ldid 会在执行时被杀
+        // （Bad executable / Killed: 9）；两者都缺时降级为 adhoc 并在记录里说明。
+        let signing = RuntimeSigner.signRuntime(descriptor: descriptor,
+                                                root: scratch,
+                                                canExecuteNative: hostCanRunNative)
+        guard signing.isAcceptable else {
+            try? fm.removeItem(at: scratch)
+            throw RuntimeInstallError.installFailed(signing.reason ?? AppLocalized("Signing failed."))
+        }
+
         await manager.publish(id, .finalizing)
         let record = InstalledRuntimeRecord(
             id: id,
@@ -468,7 +506,8 @@ final class DeveloperRuntimeManager: ObservableObject {
             sizeBytes: Self.directorySize(scratch),
             sdk: descriptor.sdk,
             provides: descriptor.provides ?? [],
-            verification: verification)
+            verification: verification,
+            signing: signing)
 
         if let metadataURL = descriptor.metadataURL.flatMap(URL.init(string:)) {
             await fetchBundleMetadata(metadataURL, into: scratch)
@@ -506,7 +545,7 @@ final class DeveloperRuntimeManager: ObservableObject {
         // 安装了新运行时（可能就是 OLLVM 前端）后，OLLVM 可用性缓存必须失效，
         // 否则界面会一直显示「缺失」直到杀进程重开。
         await MainActor.run { RuntimeCapabilityNames.refreshOllvmProbe() }
-        logger.notice("Installed runtime \(id) \(descriptor.version) (\(record.sizeBytes) bytes, self-check \(verification.status.rawValue))")
+        logger.notice("Installed runtime \(id) \(descriptor.version) (\(record.sizeBytes) bytes, self-check \(verification.status.rawValue), signing \(signing.status.rawValue))")
     }
 
     // MARK: - Unpacking

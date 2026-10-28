@@ -98,6 +98,29 @@ struct RuntimeInstallSpec: Codable, Hashable {
             .replacingOccurrences(of: "$RUNTIME_ROOT", with: root.path)
     }
 
+    /// 运行时树自带的 `manifest.json` 里声明的 `sign_paths`。
+    ///
+    /// 中央清单不重复这些长名单（python 有 70 条：python3 + Python.framework +
+    /// 68 个 extension framework；reverse_tools 9 条；theos 逐个 bin），
+    /// 而是由每个 bundle 自己带一份。`install` 块缺失或不带 `sign_paths` 时
+    /// 回退读它，否则「装了但一个都没签」—— 执行时就是 Bad executable。
+    static func bundleSignPaths(in root: URL) -> [String] {
+        let manifest = root.appendingPathComponent("manifest.json")
+        guard let data = try? Data(contentsOf: manifest),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return []
+        }
+        return (object["sign_paths"] as? [String]) ?? []
+    }
+
+    /// 该签名的目标：清单优先，其次 bundle 自带清单。
+    func signTargets(in root: URL) -> (entitlements: [String], adhoc: [String]) {
+        if !signPaths.isEmpty || !signPathsWithoutEntitlements.isEmpty {
+            return (signPaths, signPathsWithoutEntitlements)
+        }
+        return (Self.bundleSignPaths(in: root), [])
+    }
+
     /// `required_paths` 里当前缺失的项（顺序与清单一致）。
     func missingPaths(in root: URL) -> [String] {
         let fm = FileManager.default
