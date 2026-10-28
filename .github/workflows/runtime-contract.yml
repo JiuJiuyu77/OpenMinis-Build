@@ -37,7 +37,7 @@ permissions:
   contents: read
 
 env:
-  MANIFEST_URL: https://raw.githubusercontent.com/JiuJiuyu77/CodexApp-Runtime/main/Runtime/runtime-manifest.json
+  MANIFEST_URL: https://raw.githubusercontent.com/JiuJiuyu77/MinisApp-Runtime/main/Runtime/runtime-manifest.json
 
 jobs:
   manifest:

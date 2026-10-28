@@ -694,7 +694,7 @@ struct RuntimeDiagnosticsView: View {
         } header: {
             Text(verbatim: "运行时与执行器")
         } footer: {
-            Text(verbatim: "默认来源：JiuJiuyu77/CodexApp-Runtime。安装/更新/移除在 设置 → Developer Runtime 里操作。")
+            Text(verbatim: "默认来源：JiuJiuyu77/MinisApp-Runtime。安装/更新/移除在 设置 → Developer Runtime 里操作。")
         }
     }
 }

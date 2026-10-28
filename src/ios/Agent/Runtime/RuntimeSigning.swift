@@ -92,8 +92,9 @@ enum RuntimeSigner {
                             canExecuteNative: Bool,
                             timeout: TimeInterval = 180) -> RuntimeSignReport {
         let spec = descriptor.installSpecOrNone
-        let entitlementsTargets = spec.signPaths.map { root.appendingPathComponent($0) }
-        let adhocTargets = spec.signPathsWithoutEntitlements.map { root.appendingPathComponent($0) }
+        let targets = spec.signTargets(in: root)
+        let entitlementsTargets = targets.entitlements.map { root.appendingPathComponent($0) }
+        let adhocTargets = targets.adhoc.map { root.appendingPathComponent($0) }
 
         guard !entitlementsTargets.isEmpty || !adhocTargets.isEmpty else {
             return RuntimeSignReport(status: .skipped, mode: nil, signedCount: 0, failedPaths: [],
@@ -105,10 +106,11 @@ enum RuntimeSigner {
                                      reason: AppLocalized("Cannot run the signing tools in this environment."),
                                      ldidPath: nil, codexSignPath: nil, checkedAt: Date())
         }
-        guard let ldid = locateLdid() else {
-            return .failed(AppLocalized("ldid was not found. Install the Theos runtime first."))
-        }
+        let ldid = locateLdid()
         let codexSign = locateCodexSign()
+        guard ldid != nil || codexSign != nil else {
+            return .failed(AppLocalized("Neither ldid nor codex-sign was found."))
+        }
         guard let entitlements = entitlementsPlist() else {
             return .failed(AppLocalized("This app is not signed with native entitlements, so runtime binaries cannot be made executable."),
                            ldid: ldid.path)
@@ -124,17 +126,31 @@ enum RuntimeSigner {
             guard isMachO(target) else { continue }
             let name = target.lastPathComponent
 
-            // 1. ldid：写入 entitlements（或纯 adhoc）。
-            let ldidArguments = isAdhocOnly || entitlements.isEmpty
-                ? ["-S", target.path]
-                : ["-S" + (plistURL?.path ?? ""), target.path]
-            let ldidResult = RuntimeProbeRunner.run(executable: ldid.path,
-                                                    arguments: ldidArguments,
-                                                    environment: ProcessInfo.processInfo.environment,
-                                                    workingDirectory: root.path,
-                                                    timeout: timeout)
-            lastOutput = ldidResult.output
-            if ldidResult.spawnError != nil || ldidResult.status != 0 {
+            // 1. 第一段签名：优先 ldid（能写 entitlements）；Theos 运行时的 ldid
+            //    自己也可能还没签名（引导期），那就让 codex-sign 先做一次 adhoc。
+            var adhocDone = false
+            if let ldid {
+                let ldidArguments = isAdhocOnly || entitlements.isEmpty
+                    ? ["-S", target.path]
+                    : ["-S" + (plistURL?.path ?? ""), target.path]
+                let ldidResult = RuntimeProbeRunner.run(executable: ldid.path,
+                                                        arguments: ldidArguments,
+                                                        environment: ProcessInfo.processInfo.environment,
+                                                        workingDirectory: root.path,
+                                                        timeout: timeout)
+                lastOutput = ldidResult.output
+                adhocDone = ldidResult.spawnError == nil && ldidResult.status == 0
+            }
+            if !adhocDone, let codexSign {
+                let bootstrap = RuntimeProbeRunner.run(executable: codexSign.path,
+                                                       arguments: ["--adhoc-only", target.path],
+                                                       environment: ProcessInfo.processInfo.environment,
+                                                       workingDirectory: root.path,
+                                                       timeout: timeout)
+                lastOutput = bootstrap.output
+                adhocDone = bootstrap.spawnError == nil && bootstrap.status == 0
+            }
+            if !adhocDone {
                 failed.append(name)
                 continue
             }
@@ -173,7 +189,7 @@ enum RuntimeSigner {
                                      reason: snippet.isEmpty
                                         ? AppLocalized("Signing failed.")
                                         : String(snippet.prefix(400)),
-                                     ldidPath: ldid.path, codexSignPath: codexSign?.path, checkedAt: Date())
+                                     ldidPath: ldid?.path, codexSignPath: codexSign?.path, checkedAt: Date())
         }
         let mode = codexSign == nil ? "ldid" : "ldid+codex-sign"
         let status: RuntimeSignReport.Status = codexSign == nil ? .adhocOnly : .signed
@@ -259,7 +275,7 @@ enum RuntimeSigner {
                                      signedCount: signed, failedPaths: failed,
                                      reason: String(lastOutput.split(separator: "\n").suffix(3)
                                                     .joined(separator: " | ").prefix(400)),
-                                     ldidPath: ldid.path, codexSignPath: codexSign?.path, checkedAt: Date())
+                                     ldidPath: ldid?.path, codexSignPath: codexSign?.path, checkedAt: Date())
         }
         return RuntimeSignReport(status: codexSign == nil ? .adhocOnly : .signed,
                                  mode: codexSign == nil ? "ldid" : "ldid+codex-sign",
@@ -267,7 +283,7 @@ enum RuntimeSigner {
                                  reason: codexSign == nil
                                     ? AppLocalized("codex-sign is not bundled, so the App Store-style CodeDirectory is missing.")
                                     : nil,
-                                 ldidPath: ldid.path, codexSignPath: codexSign?.path, checkedAt: Date())
+                                 ldidPath: ldid?.path, codexSignPath: codexSign?.path, checkedAt: Date())
     }
 
     // MARK: - 工具定位
