@@ -61,6 +61,15 @@ STRINGS = {
     "Runtime reinstalled": ("运行时已重装", "執行環境已重裝"),
     "The toolchain runs now": ("工具链已可用", "工具鏈已可用"),
     "Still failing: ": ("仍然失败：", "仍然失敗："),
+    "No usable shell on this device": ("这台设备上没有可用的 shell", "這台裝置上沒有可用的 shell"),
+    "not executable": ("没有可执行权限", "沒有可執行權限"),
+    "not usable": ("不可用", "不可用"),
+    "This device is jailbroken/TrollStore-capable, but this build is signed without no-sandbox / platform-application — native execution stays blocked.":
+        ("设备是越狱/巨魔环境，但这个包没有 no-sandbox / platform-application 权限 —— 原生执行仍然会被拦",
+         "裝置是越獄/巨魔環境，但這個包沒有 no-sandbox / platform-application 權限 —— 原生執行仍然會被攔"),
+    "This device cannot run native binaries, so ldid cannot sign anything here.":
+        ("这台设备跑不了原生二进制，ldid 在这里签不了名",
+         "這台裝置跑不了原生二進位，ldid 在這裡簽不了名"),
 }
 
 

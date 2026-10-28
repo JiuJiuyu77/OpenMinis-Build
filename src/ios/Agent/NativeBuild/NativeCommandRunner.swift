@@ -400,8 +400,25 @@ func runtimeBinaryDamage(_ path: String) -> String? {
     let head = [UInt8](fh.readData(ofLength: 4))
     guard head.count == 4 else { return "文件过短" }
     let magic = UInt32(head[0]) | (UInt32(head[1]) << 8) | (UInt32(head[2]) << 16) | (UInt32(head[3]) << 24)
-    guard magic == 0xFEED_FACF || magic == 0xFEED_FACE else {
+    // 只认 thin Mach-O（0xFEEDFACF / 0xFEEDFACE）是错的：系统里的 shell 往往是
+    // 厚包（fat/universal，magic 0xCAFEBABE / 0xCAFEBABF，按小端读出来是
+    // 0xBEBAFECA / 0xBFBAFECA），之前会被判成「不是 Mach-O」并从候选里剔除，
+    // 于是报错只剩「所有 shell 都起不来」，却说不出任何一个的原因。
+    let thin64: UInt32 = 0xFEED_FACF
+    let thin32: UInt32 = 0xFEED_FACE
+    let fat32: UInt32 = 0xCAFE_BABE
+    let fat32Swapped: UInt32 = 0xBEBA_FECA
+    let fat64: UInt32 = 0xCAFE_BABF
+    let fat64Swapped: UInt32 = 0xBFBA_FECA
+    guard magic == thin64 || magic == thin32
+        || magic == fat32 || magic == fat32Swapped
+        || magic == fat64 || magic == fat64Swapped else {
         return "不是 Mach-O（magic 0x" + String(magic, radix: 16) + "）"
+    }
+    // 厚包至少要有 8 字节头 + 一条 arch 描述，否则是「magic 对、后面被截断」的残骸。
+    if magic == fat32 || magic == fat32Swapped || magic == fat64 || magic == fat64Swapped {
+        let minimum = (magic == fat64 || magic == fat64Swapped) ? 8 + 32 : 8 + 20
+        if size < minimum { return "厚包头被截断" }
     }
     return nil
 }

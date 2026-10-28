@@ -210,7 +210,7 @@ enum RuntimeSigner {
                               canExecuteNative: Bool? = nil,
                               timeout: TimeInterval = 180) -> RuntimeSignReport {
         let executableHost = canExecuteNative
-            ?? MinisHostEnvironmentDetector.cached.environment.canRunNativeBinaries
+            ?? MinisHostEnvironmentDetector.cached.canRunNativeBinaries
         let targets = paths.filter { isMachO($0) }
         guard !targets.isEmpty else {
             return RuntimeSignReport(status: .skipped, mode: nil, signedCount: 0, failedPaths: [],

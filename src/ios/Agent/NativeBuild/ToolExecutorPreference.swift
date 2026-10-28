@@ -99,7 +99,7 @@ final class ToolExecutorPreference: ObservableObject {
     var resolvedExecutor: ToolExecutorMode {
         if sandboxMode { return .sandbox }
         if mode == .auto {
-            if !MinisHostEnvironmentDetector.cached.environment.canRunNativeBinaries { return .sandbox }
+            if !MinisHostEnvironmentDetector.cached.canRunNativeBinaries { return .sandbox }
             if !NativeToolchain.shared.isAvailable { return .sandbox }
         }
         return mode

@@ -290095,6 +290095,116 @@
           }
         }
       }
+    },
+    "No usable shell on this device": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No usable shell on this device"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台设备上没有可用的 shell"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這台裝置上沒有可用的 shell"
+          }
+        }
+      }
+    },
+    "not executable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "not executable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有可执行权限"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "沒有可執行權限"
+          }
+        }
+      }
+    },
+    "not usable": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "not usable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不可用"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不可用"
+          }
+        }
+      }
+    },
+    "This device cannot run native binaries, so ldid cannot sign anything here.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This device cannot run native binaries, so ldid cannot sign anything here."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这台设备跑不了原生二进制，ldid 在这里签不了名"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這台裝置跑不了原生二進位，ldid 在這裡簽不了名"
+          }
+        }
+      }
+    },
+    "This device is jailbroken/TrollStore-capable, but this build is signed without no-sandbox / platform-application — native execution stays blocked.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This device is jailbroken/TrollStore-capable, but this build is signed without no-sandbox / platform-application — native execution stays blocked."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "设备是越狱/巨魔环境，但这个包没有 no-sandbox / platform-application 权限 —— 原生执行仍然会被拦"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "裝置是越獄/巨魔環境，但這個包沒有 no-sandbox / platform-application 權限 —— 原生執行仍然會被攔"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

@@ -262,13 +262,16 @@ final class RuntimeDiagnosticsModel: ObservableObject {
 
         // 10) 环境识别
         set("environment", .running)
-        set("environment", host.environment.canRunNativeBinaries ? .ok : .skipped(host.summary),
+        set("environment", host.canRunNativeBinaries ? .ok : .skipped(host.nativeOutlook),
             detail: host.nativeOutlook)
 
         // 11) 子进程身份（执行层）：posix_spawn 出来的子进程继承 uid/gid。
         set("native-spawn", .running)
-        if NativeToolchain.shared.shellPath == nil {
-            set("native-spawn", .skipped(AppLocalized("No native shell available")), detail: "")
+        // 先看有没有「能用」的候选 shell：全坏/全缺时直接说清每个路径的结局，
+        // 不要真的去 spawn 一遍再吐一句「所有 shell 都起不来」。
+        if NativeToolchain.allShellCandidates().isEmpty {
+            set("native-spawn", .failed(AppLocalized("No usable shell on this device")),
+                detail: shellUnavailableDetail())
         } else {
             let identity = await native("id -u; id -g; uname -m", timeout: 15)
             let parts = identity.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
@@ -376,6 +379,22 @@ final class RuntimeDiagnosticsModel: ObservableObject {
                 set("native-runtimes", .ok, detail: detail)
             }
         }
+    }
+
+    /// 候选 shell 全部不可用时，逐个给出「缺失 / 不可执行 / 损坏原因」。
+    private func shellUnavailableDetail() -> String {
+        let known = ["/var/jb/usr/bin/bash", "/var/jb/usr/bin/zsh", "/var/jb/bin/sh",
+                     "/usr/bin/bash", "/usr/bin/zsh", "/bin/bash", "/bin/sh"]
+        return known.map { path -> String in
+            guard FileManager.default.fileExists(atPath: path) else {
+                return path + " → " + AppLocalized("missing")
+            }
+            if let damage = runtimeBinaryDamage(path) { return path + " → " + damage }
+            if !FileManager.default.isExecutableFile(atPath: path) {
+                return path + " → " + AppLocalized("not executable")
+            }
+            return path + " → " + AppLocalized("not usable")
+        }.joined(separator: "\n")
     }
 
     private func set(_ id: String, _ status: RuntimeDiagItem.Status, detail: String = "") {

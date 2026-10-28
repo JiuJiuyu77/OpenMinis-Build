@@ -47,7 +47,7 @@ enum RuntimeRepair {
         if let health, health.ok {
             return AppLocalized("Native runtime verified — commands can run natively.")
         }
-        if !report.environment.canRunNativeBinaries || report.sandboxed {
+        if !report.canRunNativeBinaries || report.sandboxed {
             return AppLocalized("Neither TrollStore nor a jailbreak was detected, so the native runtime cannot load its own libraries (libiosexec). Everything is routed to the iSH sandbox.")
         }
         return AppLocalized("The environment allows native execution but the runtime failed its startup probe. Tap One-tap repair.")
@@ -240,7 +240,7 @@ enum RuntimeRepair {
         case "native-runtimes":
             return await reverifyInstalledRuntimes(steps: &steps)
 
-        case "native-build", "integrity":
+        case "build", "native-build", "integrity":
             // libiosexec 加载不了 / mmap 被拒：先把运行时搬进 App 容器再试；
             // 真缺文件（截断、make 不在）才重装。
             var health = await NativeRuntimeHealthMonitor.shared.refresh(force: true)
@@ -276,11 +276,13 @@ enum RuntimeRepair {
         }
         var signedTotal = 0
         var failedTotal = 0
+        let canRun = MinisHostEnvironmentDetector.detect().canRunNativeBinaries
+        if !canRun {
+            steps.append(AppLocalized("This device cannot run native binaries, so ldid cannot sign anything here."))
+        }
         for descriptor in installed {
             let root = DeveloperRuntimePaths.runtimeRoot(id: descriptor.id)
-            let report = RuntimeSigner.signRuntime(descriptor: descriptor,
-                                                    root: root,
-                                                    canExecuteNative: true)
+            let report = await signOffMainThread(descriptor: descriptor, root: root, canExecuteNative: canRun)
             manager.updateSigning(report, for: descriptor.id)
             signedTotal += report.signedCount
             failedTotal += report.failedPaths.count
@@ -298,6 +300,22 @@ enum RuntimeRepair {
         }
         steps.append(AppLocalized("Some binaries could not be signed. If ldid is missing, reinstall the Theos runtime (it ships its own ldid)."))
         return RuntimeRepairReport(title: AppLocalized("Signing partially failed"), steps: steps, resolved: false)
+    }
+
+    /// ldid 要真起子进程，几百个文件签下来是几十秒级的活。放在主线程上会
+    /// 卡死界面、超过看门狗时限还会被系统直接杀掉，所以丢到后台队列。
+    nonisolated private static func signOffMainThread(descriptor: RuntimeDescriptor,
+                                                      root: URL,
+                                                      canExecuteNative: Bool) async -> RuntimeSignReport {
+        await withCheckedContinuation { (continuation: CheckedContinuation<RuntimeSignReport, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let report = RuntimeSigner.signRuntime(descriptor: descriptor,
+                                                       root: root,
+                                                       canExecuteNative: canExecuteNative,
+                                                       timeout: 90)
+                continuation.resume(returning: report)
+            }
+        }
     }
 
     /// 自检：对已装运行时重跑清单里的探针，结论写回安装记录。

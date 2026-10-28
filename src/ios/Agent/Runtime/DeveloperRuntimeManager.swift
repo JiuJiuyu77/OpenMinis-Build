@@ -481,7 +481,7 @@ final class DeveloperRuntimeManager: ObservableObject {
         // 也不覆盖上一份可用的安装 —— 换版本失败时用户仍然留着一个能编译的 Theos。
         await manager.publish(id, .verifying)
         // 30 秒缓存的探测结果：沙盒/侧载环境下 probe 记 skipped，而不是判坏包。
-        let hostCanRunNative = MinisHostEnvironmentDetector.cached.environment.canRunNativeBinaries
+        let hostCanRunNative = MinisHostEnvironmentDetector.cached.canRunNativeBinaries
         let verification = await RuntimeInstallVerifier.verify(
             descriptor: descriptor,
             root: scratch,
