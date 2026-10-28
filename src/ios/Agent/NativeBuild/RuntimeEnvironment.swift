@@ -60,8 +60,19 @@ enum MinisHostEnvironment: String, Sendable {
 struct MinisHostEnvironmentReport: Sendable {
     let environment: MinisHostEnvironment
     let sandboxed: Bool
+    /// 本进程签名里是否真的带 no-sandbox / platform-application。
+    /// 这才是 posix_spawn 能不能过内核的硬条件。
+    let hasNativeEntitlements: Bool
     let evidence: [String]
     let checkedAt: Date
+
+    /// 能不能指望 spawn 出原生二进制。
+    ///
+    /// 以前这里是看「环境类型」（有 /var/jb 就算能跑）。这是个实打实的错判：
+    /// 越狱目录存在只说明设备被越狱过，不代表**这个 App** 拿到了 no-sandbox；
+    /// 结果界面上「设备环境：当前环境可以原生执行」打勾，下面每一行却全是
+    /// 「Every candidate shell failed」。现在只认签名权限。
+    var canRunNativeBinaries: Bool { hasNativeEntitlements }
 
     var summary: String {
         let sandboxText = sandboxed
@@ -72,8 +83,12 @@ struct MinisHostEnvironmentReport: Sendable {
 
     /// 「原生执行能不能指望」的一句话结论。
     var nativeOutlook: String {
-        if environment.canRunNativeBinaries && !sandboxed {
+        if canRunNativeBinaries {
             return AppLocalized("Native execution is possible in this environment.")
+        }
+        if environment != .appSandbox, environment != .unknown {
+            // 设备是越狱/巨魔环境，但这个包没有对应权限：说出来，别让人去查运行时。
+            return AppLocalized("This device is jailbroken/TrollStore-capable, but this build is signed without no-sandbox / platform-application — native execution stays blocked.")
         }
         return AppLocalized("Native execution is blocked here — commands stay in the iSH sandbox.")
     }
@@ -169,6 +184,7 @@ enum MinisHostEnvironmentDetector {
 
         return MinisHostEnvironmentReport(environment: environment,
                                           sandboxed: sandboxed,
+                                          hasNativeEntitlements: noSandbox || platformApp,
                                           evidence: evidence,
                                           checkedAt: Date())
     }

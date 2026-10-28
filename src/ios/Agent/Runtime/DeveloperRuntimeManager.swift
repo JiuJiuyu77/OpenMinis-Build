@@ -239,6 +239,22 @@ final class DeveloperRuntimeManager: ObservableObject {
         records[id]?.verification
     }
 
+    /// 单项修复用：把重跑自检的结论写回安装记录（不重装、不动文件）。
+    func updateVerification(_ report: RuntimeVerificationReport, for id: String) {
+        guard var record = records[id] else { return }
+        record.verification = report
+        records[id] = record
+        saveRecords()
+    }
+
+    /// 单项修复用：把重新签名的结论写回安装记录。
+    func updateSigning(_ report: RuntimeSignReport, for id: String) {
+        guard var record = records[id] else { return }
+        record.signing = report
+        records[id] = record
+        saveRecords()
+    }
+
     /// 安装记录里的签名结论。
     func signingReport(for id: String) -> RuntimeSignReport? {
         records[id]?.signing
@@ -465,7 +481,7 @@ final class DeveloperRuntimeManager: ObservableObject {
         // 也不覆盖上一份可用的安装 —— 换版本失败时用户仍然留着一个能编译的 Theos。
         await manager.publish(id, .verifying)
         // 30 秒缓存的探测结果：沙盒/侧载环境下 probe 记 skipped，而不是判坏包。
-        let hostCanRunNative = MinisHostEnvironmentDetector.cached.environment.canRunNativeBinaries
+        let hostCanRunNative = MinisHostEnvironmentDetector.cached.canRunNativeBinaries
         let verification = await RuntimeInstallVerifier.verify(
             descriptor: descriptor,
             root: scratch,

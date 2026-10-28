@@ -91,15 +91,12 @@
 		DRT000302 /* CapabilityRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = DRT000402 /* CapabilityRegistry.swift */; };
 		DRT000303 /* BuiltinCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = DRT000403 /* BuiltinCapabilities.swift */; };
 		DRT000304 /* PluginCapabilityBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = DRT000404 /* PluginCapabilityBridge.swift */; };
-		DRT000305 /* ToolExecutorSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DRT000405 /* ToolExecutorSettingsView.swift */; };
 		DRT000306 /* PluginManifestStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DRT000406 /* PluginManifestStore.swift */; };
 		DRT000307 /* DebArchive.swift in Sources */ = {isa = PBXBuildFile; fileRef = DRT000407 /* DebArchive.swift */; };
 		DRT000308 /* ZstdDecompressor.swift in Sources */ = {isa = PBXBuildFile; fileRef = DRT000408 /* ZstdDecompressor.swift */; };
 		DRT000309 /* OpenAICapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = DRT000409 /* OpenAICapabilities.swift */; };
 		DRT000310 /* RuntimeCapabilityNames.swift in Sources */ = {isa = PBXBuildFile; fileRef = DRT000410 /* RuntimeCapabilityNames.swift */; };
-		DRT000311 /* CuratedPluginCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = DRT000411 /* CuratedPluginCatalog.swift */; };
 		DRT000312 /* RuntimeDiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DRT000412 /* RuntimeDiagnosticsView.swift */; };
-		DRT000313 /* PluginManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DRT000413 /* PluginManagementView.swift */; };
 		BKP000117 /* BackupOpenRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = BKP000217 /* BackupOpenRouter.swift */; };
 		BKP000118 /* BackupSecretsImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = BKP000218 /* BackupSecretsImporter.swift */; };
 		BKP000119 /* BackupRestoreJournal.swift in Sources */ = {isa = PBXBuildFile; fileRef = BKP000219 /* BackupRestoreJournal.swift */; };
@@ -880,15 +877,12 @@
 		DRT000402 /* CapabilityRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapabilityRegistry.swift; sourceTree = "<group>"; };
 		DRT000403 /* BuiltinCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuiltinCapabilities.swift; sourceTree = "<group>"; };
 		DRT000404 /* PluginCapabilityBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginCapabilityBridge.swift; sourceTree = "<group>"; };
-		DRT000405 /* ToolExecutorSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolExecutorSettingsView.swift; sourceTree = "<group>"; };
 		DRT000406 /* PluginManifestStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginManifestStore.swift; sourceTree = "<group>"; };
 		DRT000407 /* DebArchive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebArchive.swift; sourceTree = "<group>"; };
 		DRT000408 /* ZstdDecompressor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZstdDecompressor.swift; sourceTree = "<group>"; };
 		DRT000409 /* OpenAICapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAICapabilities.swift; sourceTree = "<group>"; };
 		DRT000410 /* RuntimeCapabilityNames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeCapabilityNames.swift; sourceTree = "<group>"; };
-		DRT000411 /* CuratedPluginCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CuratedPluginCatalog.swift; sourceTree = "<group>"; };
 		DRT000412 /* RuntimeDiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeDiagnosticsView.swift; sourceTree = "<group>"; };
-		DRT000413 /* PluginManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginManagementView.swift; sourceTree = "<group>"; };
 		BKP000217 /* BackupOpenRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupOpenRouter.swift; sourceTree = "<group>"; };
 		BKP000218 /* BackupSecretsImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupSecretsImporter.swift; sourceTree = "<group>"; };
 		BKP000219 /* BackupRestoreJournal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupRestoreJournal.swift; sourceTree = "<group>"; };
@@ -1892,7 +1886,6 @@
 				DRT000408 /* ZstdDecompressor.swift */,
 				DRT000409 /* OpenAICapabilities.swift */,
 				DRT000410 /* RuntimeCapabilityNames.swift */,
-				DRT000411 /* CuratedPluginCatalog.swift */,
 				DRT000202 /* RuntimeManifest.swift */,
 				DRT000414 /* RuntimeInstallSpec.swift */,
 				DRT000415 /* RuntimeInstallVerifier.swift */,
@@ -2696,8 +2689,6 @@
 				E5TLS0011 /* ToolsSettingsView.swift */,
 				DRT000204 /* DeveloperRuntimeSettingsView.swift */,
 				DRT000412 /* RuntimeDiagnosticsView.swift */,
-				DRT000413 /* PluginManagementView.swift */,
-				DRT000405 /* ToolExecutorSettingsView.swift */,
 				E5LOCK102 /* FaceIDProtectionSettingsView.swift */,
 				E5LOCK103 /* AppLockOverlay.swift */,
 			);
@@ -2836,6 +2827,7 @@
 				E51000041 /* Sources */,
 				E51000020 /* Frameworks */,
 				E51000042 /* Resources */,
+				E5H0STAG0 /* Stage App Helpers */,
 				AA26BD2D2F2E659300AECF2D /* Copy Alpine Rootfs */,
 				AAF00F032F50A00000049557 /* Embed Frameworks */,
 				E5E000060 /* Embed Foundation Extensions */,
@@ -3093,6 +3085,21 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		E5H0STAG0 /* Stage App Helpers */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Stage App Helpers";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "\"${SRCROOT}/../scripts/stage_app_helpers.sh\"\n";
+		};
 		AC0000200 /* Generate Provider Customization */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
@@ -3635,15 +3642,12 @@
 				DRT000302 /* CapabilityRegistry.swift in Sources */,
 				DRT000303 /* BuiltinCapabilities.swift in Sources */,
 				DRT000304 /* PluginCapabilityBridge.swift in Sources */,
-				DRT000305 /* ToolExecutorSettingsView.swift in Sources */,
 				DRT000306 /* PluginManifestStore.swift in Sources */,
 				DRT000307 /* DebArchive.swift in Sources */,
 				DRT000308 /* ZstdDecompressor.swift in Sources */,
 				DRT000309 /* OpenAICapabilities.swift in Sources */,
 				DRT000310 /* RuntimeCapabilityNames.swift in Sources */,
-				DRT000311 /* CuratedPluginCatalog.swift in Sources */,
 				DRT000312 /* RuntimeDiagnosticsView.swift in Sources */,
-				DRT000313 /* PluginManagementView.swift in Sources */,
 				BKP000114 /* BackupDelivery.swift in Sources */,
 				BKP000130 /* BackupDestinations.swift in Sources */,
 				BKP000131 /* BackupActivityLock.swift in Sources */,

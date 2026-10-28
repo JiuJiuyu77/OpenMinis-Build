@@ -33,7 +33,13 @@ if [ -z "$PRODUCTS_DIR" ] || [ -z "$WRAPPER" ]; then
   exit 0
 fi
 
-SOURCE_DIR="${SRCROOT}/Configs/Helpers"
+# Xcode 的 SRCROOT 是 src/ios，二进制放在仓库根的 Configs/Helpers/；
+# 独立调用时 SRCROOT 可能就是仓库根，两种都认。
+if [ -d "${SRCROOT}/Configs/Helpers" ]; then
+  SOURCE_DIR="${SRCROOT}/Configs/Helpers"
+else
+  SOURCE_DIR="${SRCROOT}/../Configs/Helpers"
+fi
 if [ ! -d "$SOURCE_DIR" ]; then
   echo "stage_app_helpers: ${SOURCE_DIR} does not exist, nothing to stage"
   exit 0

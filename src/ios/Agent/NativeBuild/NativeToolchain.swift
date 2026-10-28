@@ -273,12 +273,20 @@ struct NativeToolchain {
         ])
         let fm = FileManager.default
         var seen = Set<String>()
-        // 截断/非 Mach-O 的 shell 直接排除：它只会让 posix_spawn 返回 EBADEXEC，
+        // 截断/非 Mach-O 的 shell 先排除：它只会让 posix_spawn 返回 EBADEXEC，
         // 然后在错误信息里伪装成「所有 shell 都启动不了」。
-        return candidates.filter {
+        let healthy = candidates.filter {
             fm.isExecutableFile(atPath: $0)
                 && runtimeBinaryDamage($0) == nil
                 && seen.insert($0).inserted
+        }
+        if !healthy.isEmpty { return healthy }
+        // 一个都不健康时不要把列表清空。返回空数组会让最终报错变成
+        // 「Shells tried:」后面什么都没有 —— 用户分不清是「没装运行时」还是
+        // 「装了但每一个都坏了」。原样返回，让每条候选各自带上损坏原因。
+        var fallbackSeen = Set<String>()
+        return candidates.filter {
+            fm.isExecutableFile(atPath: $0) && fallbackSeen.insert($0).inserted
         }
     }
 
