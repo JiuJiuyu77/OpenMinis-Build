@@ -73,7 +73,10 @@ jobs:
 
   swift-syntax:
     name: Runtime sources parse
-    runs-on: ubuntu-latest
+    # ubuntu-latest rolled to 26.04, which swift-actions/setup-swift does not
+    # support yet ("Version 26.04 of Ubuntu is not supported"). Pin the runner
+    # instead of chasing the alias.
+    runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
