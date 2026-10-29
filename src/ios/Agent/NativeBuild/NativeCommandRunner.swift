@@ -340,6 +340,7 @@ enum NativeSpawnIdentity {
         // MT's availability gate requires set_persona_np; uid/gid APIs are
         // optional refinements. Preserve native caller identity if they are absent.
         guard let persona = dlsym(handle, "posix_spawnattr_set_persona_np") else { return ENOTSUP }
+        typealias Identity = @convention(c) (UnsafeMutablePointer<posix_spawnattr_t?>, UInt32) -> Int32
         let setPersona = unsafeBitCast(persona, to: Persona.self)
         let personaResult = setPersona(&attributes, 99, 1)
         guard personaResult == 0 else { return personaResult }
