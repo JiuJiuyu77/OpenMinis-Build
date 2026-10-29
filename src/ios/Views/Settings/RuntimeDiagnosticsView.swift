@@ -842,3 +842,29 @@ struct RuntimeDiagnosticsView: View {
         }
     }
 }
+
+
+// MARK: - MT 诊断报告导出
+
+extension RuntimeDiagnosticsModel {
+    /// 生成 MT 风格的诊断报告
+    func exportMTReport() -> String {
+        guard let finishedAt = finishedAt else {
+            return "诊断尚未完成，无法生成报告"
+        }
+        
+        let report = MTDiagnosticsReport.build(
+            from: self,
+            elapsed: elapsed,
+            finishedAt: finishedAt
+        )
+        
+        return report.formatted()
+    }
+    
+    /// 保存报告到文件
+    func saveReport(to url: URL) throws {
+        let report = exportMTReport()
+        try report.write(to: url, atomically: true, encoding: .utf8)
+    }
+}

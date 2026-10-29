@@ -109,14 +109,27 @@ enum NativeCommandRunner {
                 let root = (prefix as NSString).deletingLastPathComponent
                 if !bin.isEmpty { dirs.append(bin) }
                 if !prefix.isEmpty { dirs.append("\(prefix)/lib") }
+                if !prefix.isEmpty { dirs.append("\(prefix)/usr/lib") }
+                if !prefix.isEmpty { dirs.append("\(prefix)/usr/local/lib") }
                 if !root.isEmpty { dirs.append("\(root)/lib") }
+                if !root.isEmpty { dirs.append("\(root)/usr/lib") }
+            }
+            // 添加 App Frameworks 路径（签名过的动态库）
+            if let fwPath = Bundle.main.privateFrameworksPath {
+                dirs.append(fwPath)
             }
             let joined = dirs.joined(separator: ":")
             if !joined.isEmpty {
-                if let existing = environment["DYLD_FALLBACK_LIBRARY_PATH"], !existing.isEmpty {
-                    environment["DYLD_FALLBACK_LIBRARY_PATH"] = "\(existing):\(joined)"
+                // 使用 DYLD_LIBRARY_PATH 而不是 FALLBACK 版本
+                // MT 模式：强制搜索路径，确保运行时动态库优先被找到
+                if let existing = environment["DYLD_LIBRARY_PATH"], !existing.isEmpty {
+                    environment["DYLD_LIBRARY_PATH"] = "\(joined):\(existing)"
                 } else {
-                    environment["DYLD_FALLBACK_LIBRARY_PATH"] = joined
+                    environment["DYLD_LIBRARY_PATH"] = joined
+                }
+                // 设置 Framework 搜索路径
+                if let fwPath = Bundle.main.privateFrameworksPath {
+                    environment["DYLD_FRAMEWORK_PATH"] = fwPath
                 }
             }
         }
