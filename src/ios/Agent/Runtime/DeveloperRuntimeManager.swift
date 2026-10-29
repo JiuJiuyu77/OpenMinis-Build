@@ -52,7 +52,7 @@ struct InstalledRuntimeRecord: Codable, Equatable {
     /// 装完那一刻按清单 `install` 块做的自检结论。
     /// 旧记录没有这个字段（新增为可选），解码时按 nil 处理。
     var verification: RuntimeVerificationReport?
-    /// 装完之后的分发签名结论（ldid → codex-sign）。
+    /// 装完之后的分发签名结论（ldid → minis-sign）。
     var signing: RuntimeSignReport?
 }
 
@@ -157,6 +157,7 @@ final class DeveloperRuntimeManager: ObservableObject {
     /// 这里只消费工具链类运行时（Theos / OLLVM / Node / Python / CoreTools /
     /// ReverseTools），codex 条目在列表里连显示都不该出现，免得用户装一个
     /// 与本 App 无关的 100MB deb。
+    /// Codex CLI 运行时包已被移除，Minis 使用自己的 AI 层方案。
     static let unsupportedHandlers: Set<String> = ["codex"]
 
     /// 本 App 会展示与安装的运行时：清单顺序减去不采纳的 handler。
@@ -501,7 +502,7 @@ final class DeveloperRuntimeManager: ObservableObject {
                 parts.isEmpty ? AppLocalized("Runtime self-check failed.") : parts.joined(separator: " — "))
         }
 
-        // 3.6 签名：ldid 写 entitlements，再让 codex-sign 补 App Store 形态的
+        // 3.6 签名：ldid 写 entitlements，再让 minis-sign 补 App Store 形态的
         // CodeDirectory。运行时里全是 Mach-O，只做 ldid 会在执行时被杀
         // （Bad executable / Killed: 9）；两者都缺时降级为 adhoc 并在记录里说明。
         let signing = RuntimeSigner.signRuntime(descriptor: descriptor,

@@ -8,7 +8,7 @@
 //  （`product == .dylib`），所以这一步天然接在编译之后。
 //
 //  两件事必须说清楚，不能假装成功：
-//    1. 注入会让原签名失效 → 打壳收尾就地用 ldid + codex-sign 重签；
+//    1. 注入会让原签名失效 → 打壳收尾就地用 ldid + minis-sign 重签；
 //       工具不可用时明确标成 needsResign，交给用户/CI；
 //    2. 注入需要 Load Command 区有空隙 → 没有空隙时明确报错，而不是产出
 //       一个装上去就闪退的包。
@@ -48,7 +48,7 @@ enum IPAShellPacker {
         let executable: String
         let injectedDylib: String
         let needsResign: Bool
-        /// 注入后的签名结论：ldid + codex-sign 成功时 needsResign 为 false。
+        /// 注入后的签名结论：ldid + minis-sign 成功时 needsResign 为 false。
         let signing: RuntimeSignReport?
     }
 
@@ -114,7 +114,7 @@ enum IPAShellPacker {
             throw ShellError.injectFailed(error.localizedDescription)
         }
 
-        // 注入清掉了原签名，就地补回去：ldid 写 entitlements，codex-sign 补
+        // 注入清掉了原签名，就地补回去：ldid 写 entitlements，minis-sign 补
         // App Store 形态的 CodeDirectory（只做 ldid 会被 AMFI 杀掉）。
         // 工具不可用时保持 needsResign = true，并把原因写进日志，不假装签好。
         let signing = RuntimeSigner.signArtifacts(paths: [executable, dylibTarget])
@@ -122,9 +122,9 @@ enum IPAShellPacker {
         switch signing.status {
         case .signed:
             needsResign = false
-            onLog("▸ 已重签主二进制与注入的 dylib（ldid + codex-sign，\(signing.signedCount) 个）")
+            onLog("▸ 已重签主二进制与注入的 dylib（ldid + minis-sign，\(signing.signedCount) 个）")
         case .adhocOnly:
-            onLog("⚠️ 只做了 adhoc 签名（缺 codex-sign）：安装后可能被 AMFI 杀掉（Bad executable / Killed: 9）。")
+            onLog("⚠️ 只做了 adhoc 签名（缺 minis-sign）：安装后可能被 AMFI 杀掉（Bad executable / Killed: 9）。")
         case .skipped:
             onLog("⚠️ 未重签：\(signing.reason ?? AppLocalized("signing unavailable"))")
         case .failed:

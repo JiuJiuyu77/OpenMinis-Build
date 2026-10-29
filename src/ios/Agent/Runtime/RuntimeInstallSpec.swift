@@ -132,7 +132,7 @@ struct RuntimeInstallSpec: Codable, Hashable {
 
 /// 把 `install` 块翻译成子进程能用的环境。
 ///
-/// 变量集合刻意与运行时端保持一致，因为 Node 运行时的 `lib/codex/*.js` 就是读这些：
+/// 变量集合与 MT Agent 运行时保持一致：
 /// `CA_TOOL_<ID>_RUNTIME_ROOT`（runtimeRoot）、`SHELL` / `CA_THEOS_BASH`
 /// （preferredShell）、`CA_THEOS_SDKROOT` + `CA_THEOS_CLANG/CLANGXX/MAKE`（编译默认值）。
 enum RuntimeEnvironmentOverlay {

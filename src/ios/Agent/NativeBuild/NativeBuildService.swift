@@ -474,12 +474,12 @@ final class NativeBuildService: ObservableObject {
         case .dylib:
             if let dylib = IPAShellPacker.findBuiltDylib(in: config.projectPath) {
                 // dyld 只接受签名完整的 dylib；ldid 写入 entitlements 后再用
-                // codex-sign 补 CodeDirectory，缺工具时保持原样并如实说明。
+                // minis-sign 补 CodeDirectory，缺工具时保持原样并如实说明。
                 let signing = RuntimeSigner.signArtifacts(paths: [dylib])
                 if signing.status != .signed {
                     onLine?("⚠️ dylib 未完整签名：\(signing.shortSummary)")
                 } else {
-                    onLine?("▸ 已签名 dylib（ldid + codex-sign）")
+                    onLine?("▸ 已签名 dylib（ldid + minis-sign）")
                 }
                 artifacts = [dylib.path]
                 foundMessage = "构建成功（dylib）"

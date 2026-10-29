@@ -91,7 +91,7 @@ swiftc -typecheck \
 - `reuseExternalRuntime`（复用外部运行时）—— 复用别的 App 的运行时目录是本项目早期的
   权宜之计。那条路在沙箱构建里 mmap 不了对方的 dylib，还会把「没装 Theos」显示成
   「已就绪」。现在运行时由本 App 自己安装、**自检**（`RuntimeInstallVerifier`）并
-  **签名**（`RuntimeSigner`，ldid + codex-sign），借别人的目录只剩坏处。
+  **签名**（`RuntimeSigner`，ldid + minis-sign），借别人的目录只剩坏处。
 
 所以 `NativeToolchain.candidateRoots()` 现在只扫：手动路径 → `DeveloperRuntime/installed/*`
 → App 内置 `NativeToolchain/` → `Application Support/NativeToolchain/`；
@@ -292,12 +292,12 @@ probe 输出会被截断到 4KB 并写进日志与设置页，便于区分「包
 |---|---|---|---|
 | 1. 执行层 | `Helpers/bash.real`（真 bash，Darwin syscall + `posix_spawn`），不是 iSH 里的 Linux busybox | 已有（找不到时依次回退 `/var/jb/usr/bin/bash`、`/bin/bash`、`/bin/sh`，并在 `Helpers/`、`TheosCompat/`、`TheosCoreCompat/` 里补 coreutils 别名） | `NativeBuild/NativeToolchain.swift`、`NativeBuild/NativeCommandRunner.swift` |
 | 2. 工具层 | Theos 运行时：`clang-16`、`ld64`、`ar`、`strip`、`ldid`、`dpkg-deb`、`iPhoneOS16.5.sdk`、makefiles/headers/lib | 已有（真机 arm64 编译，不交叉模拟） | `Runtime/DeveloperRuntimeManager.swift`、`NativeBuild/NativeToolchain.swift` |
-| 3. 签名层 | `ldid -S<entitlements>` 写权限 → `codex-sign` 补 App Store 形态 CodeDirectory（TeamID + cdhashes） | **本分支新增** | `Runtime/RuntimeSigning.swift` |
+| 3. 签名层 | `ldid -S<entitlements>` 写权限 → `minis-sign` 补 App Store 形态 CodeDirectory（TeamID + cdhashes） | **本分支新增** | `Runtime/RuntimeSigning.swift` |
 
 ### 为什么必须两步
 
 只做 `ldid` 是「签名残缺」：`posix_spawn` 可能过得去，但一执行就被杀，表现为
-`Bad executable` 或 `Killed: 9` —— AMFI 不认这个签名结构。`codex-sign` 在 adhoc
+`Bad executable` 或 `Killed: 9` —— AMFI 不认这个签名结构。`minis-sign` 在 adhoc
 签名之上重写签名 superblob：Thin/FAT 归一到 arm64、补 cdhashes、设置 TeamID，并走
 TrollStore 的 CoreTrust 绕过路径。
 
@@ -322,24 +322,24 @@ TrollStore 的 CoreTrust 绕过路径。
 `install.sign_paths_without_entitlements`（adhoc-only），逐个：
 
 1. `ldid -S<tmp>/entitlements.plist <file>`
-2. `codex-sign [--entitlements plist] <file>`
+2. `minis-sign [--entitlements plist] <file>`
 
-结论落在安装记录里（`RuntimeSignReport`），设置页显示 `Signed (ldid + codex-sign)`、
+结论落在安装记录里（`RuntimeSignReport`），设置页显示 `Signed (ldid + minis-sign)`、
 `Ad-hoc signed only`、`Signing skipped`、`Signing failed` 四种之一。签名失败会让安装
 失败并保留上一份可用的运行时——一个「装了但执行即崩」的工具链比没有更糟。
 
-### 把 bash.real / codex-sign 放进包
+### 把 bash.real / minis-sign 放进包
 
 `Helpers/` 目前不在 Xcode 工程里，需要一次构建配置（不是代码改动）：
 
-1. 把 `bash.real`、`codex-sign`（可选 `ca-filetool`、`ldid`）放到 `Configs/Helpers/`；
+1. 把 `bash.real`、`minis-sign`（可选 `ca-filetool`、`ldid`）放到 `Configs/Helpers/`；
 2. 在 Minis target 里加一个 Run Script 构建阶段（放在签名阶段之前）：
    `"${SRCROOT}/scripts/stage_app_helpers.sh"`；
 3. 脚本会把文件复制到 `<App>.app/Helpers/`、补 `bash`/`sh`/coreutils 软链，并用当前
    签名身份对副本做一次 adhoc 签名（`Configs/Helpers/` 为空时整体 no-op，不影响普通构建）。
 
-`codex-sign` 没进包也能跑：signer 会退化成 `Ad-hoc signed only` 并在记录里写明原因；
-也可以把 `codex-sign` 放到 `Application Support/DeveloperRuntime/Helpers/codex-sign`，
+`minis-sign` 没进包也能跑：signer 会退化成 `Ad-hoc signed only` 并在记录里写明原因；
+也可以把 `minis-sign` 放到 `Application Support/DeveloperRuntime/Helpers/minis-sign`，
 不重新打包即生效。
 
 ## 为什么不安装 Codex 运行时
@@ -360,7 +360,7 @@ TrollStore 的 CoreTrust 绕过路径。
 `node`、`python`、`core_tools`、`build_tools`、`reverse_tools` —— 这些是「在真机上编译
 与打包」的通用能力，与谁的 AI 层无关。
 
-顺带说明一个名词：`Helpers/codex-sign` 里的 “codex” 与 Codex AI 无关，它是 TrollStore
+顺带说明一个名词：`Helpers/minis-sign` 里的 “codex” 与 Codex AI 无关，它是 TrollStore
 血统的签名工具名（补 App Store 形态 CodeDirectory），本分支的签名层用的就是它。
 
 ### 产物签名（不只是运行时）
@@ -369,7 +369,7 @@ TrollStore 的 CoreTrust 绕过路径。
 
 | 场景 | 处理 |
 |---|---|
-| `product == .dylib` | 编完立刻 `ldid` + `codex-sign`，日志里 `已签名 dylib`；缺工具时如实写 `dylib 未完整签名` |
+| `product == .dylib` | 编完立刻 `ldid` + `minis-sign`，日志里 `已签名 dylib`；缺工具时如实写 `dylib 未完整签名` |
 | `product == .ipaShell` | 注入会清掉原签名，打壳收尾对**主二进制 + 注入的 dylib** 重签；成功则结论文案变成「打壳成功（已重签）」，失败/不可用时仍标「需要重签」并写明原因 |
 
 `RuntimeSigner.signArtifacts(paths:)` 是这两个场景的共用入口：不依赖清单条目，
@@ -398,7 +398,7 @@ TrollStore 的 CoreTrust 绕过路径。
 | 子进程身份 | 用运行时 shell 跑 `id -u; id -g; uname -m` | uid 必须是 0，否则报「子进程不是 root」 |
 | 文件系统边界 | 依次尝试在 `/tmp`、`/var/mobile/Library`、`/var/mobile/Media` 落文件，再尝试写 `/`、`/System/Library` | 前三个必须可写；后两个必须**不可写**（SSV 封签）；反过来可写才是异常 |
 | TCC 边界 | 尝试 `head -c 1` 读取短信、通话、TCC 数据库 | 三个都必须被拒；能读才是问题 |
-| 签名层 | `RuntimeSigner.locateLdid()` / `locateCodexSign()` / `entitlementsPlist()` | 二者齐备且有可传播 entitlements 才算 ok；缺 codex-sign 降级为 skipped 并说明只能 adhoc |
+| 签名层 | `RuntimeSigner.locateLdid()` / `locateCodexSign()` / `entitlementsPlist()` | 二者齐备且有可传播 entitlements 才算 ok；缺 minis-sign 降级为 skipped 并说明只能 adhoc |
 | 运行时自检 | 逐条读安装记录里的 `verification` / `signing` | 任一条 failed 即红；旧记录（没有这两个字段）标注「早于自检机制安装」 |
 
 这几项对应 MT 实测的那组事实：`uid=0 gid=0`、可写 `/tmp`·`Library`·`Media`、可枚举其它

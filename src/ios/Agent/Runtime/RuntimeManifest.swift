@@ -375,7 +375,7 @@ enum RuntimeVersionCatalog {
         return parts[0] + "/" + parts[1]
     }
 
-    /// 列出某个 handler（目前只有 codex）的可选版本，按发布时间倒序。
+    /// 列出某个 handler 的可选版本，按发布时间倒序。
     static func versions(handler: String, limit: Int = 12) async -> [Option] {
         guard let slug = repositorySlug,
               let url = URL(string: "https://api.github.com/repos/\(slug)/releases?per_page=100") else {

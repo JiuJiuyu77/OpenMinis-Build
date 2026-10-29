@@ -1,0 +1,26 @@
+--- a/README.md
++++ b/README.md
+@@ -132,6 +132,23 @@ IPA.
+ | Installer | `src/ios/Agent/Runtime/DeveloperRuntimeManager.swift` |
+ | Settings screen | `src/ios/Views/Settings/DeveloperRuntimeSettingsView.swift` |
+ 
++### Runtime Versions (aligned with MT Agent 1.1.0)
++
++| Component | Version | Features |
++|-----------|---------|----------|
++| **Node.js** | 24.5.0 (recommended)<br/>18.20.4 (compatible) | npm 11.5.1, native module compilation (node-gyp + N-API), iOS arm64 optimized |
++| **OLLVM** | Arkari LLVM 23.1.1 | String encryption (`--irobf-cse`), integer/float constant encryption (`--irobf-cie`/`cfe`), control flow flattening (`--irobf-fla`), arm64/arm64e support |
++| **Theos** | adapter rev14, format 3 | clang-16 → iOS 16.0, iPhoneOS16.5.sdk, rootful/rootless/roothide package schemes |
++| **Python** | 3.13.14 | OpenSSL 3.0.18, sqlite 3.39.5, 184 stdlib modules |
++| **CoreTools** | 2.0 | git 2.39.1, ripgrep 15.2.0, curl 8.22.0, jq 1.8.2, zip/unzip |
++| **BuildTools** | - | cmake 3.27.9, ninja 1.11.1 |
++| **ReverseTools** | radare2 6.2.4 | rabin2, rasm2, radiff2, rahash2, mt-macho, mt-inject-dylib, mt-rev |
++
++**Runtime source:** [susu123oss/CodexApp-Runtime](https://github.com/susu123oss/CodexApp-Runtime/releases)
++
++All runtimes are pre-compiled for iOS arm64, compatible with TrollStore and jailbroken environments.
++Node.js 24 includes full native module support with automatic compilation, signing and loading.
++
+ ### v1.15 build 14 — what changed
+ 
+ - **Launch crash fixed (really this time).** The entitlement guard existed but

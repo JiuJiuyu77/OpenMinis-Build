@@ -101,7 +101,7 @@ final class RuntimeDiagnosticsModel: ObservableObject {
     ]
 
     /// MT 式「三层执行链」实测：执行层（子进程身份 + 文件边界 + TCC 边界）、
-    /// 签名层（ldid + codex-sign）、以及每个已装运行时的自检/签名结论。
+    /// 签名层（ldid + minis-sign）、以及每个已装运行时的自检/签名结论。
     /// 这些项以前完全没有：诊断页只能说「工具链在不在」，说不清「装完了能不能跑」。
     @Published var nativeLayers: [RuntimeDiagItem] = [
         .init(id: "native-spawn", title: AppLocalized("Child process identity"),
@@ -115,7 +115,7 @@ final class RuntimeDiagnosticsModel: ObservableObject {
               subtitle: AppLocalized("SMS / CallHistory / TCC stay unreadable despite root")),
         .init(id: "native-sign", title: AppLocalized("Signing layer"),
               icon: "signature", tint: [.purple, .indigo],
-              subtitle: AppLocalized("ldid + codex-sign, and the entitlements they propagate")),
+              subtitle: AppLocalized("ldid + minis-sign, and the entitlements they propagate")),
         .init(id: "native-runtimes", title: AppLocalized("Runtime self-checks"),
               icon: "checkmark.seal.fill", tint: [.mint, .green],
               subtitle: AppLocalized("Per-runtime self-check and signing outcome")),
@@ -333,18 +333,18 @@ final class RuntimeDiagnosticsModel: ObservableObject {
                 detail: opened.joined(separator: ", "))
         }
 
-        // 14) 签名层：ldid + codex-sign 是否就位，以及可传播的 entitlements。
+        // 14) 签名层：ldid + minis-sign 是否就位，以及可传播的 entitlements。
         set("native-sign", .running)
         let ldid = RuntimeSigner.locateLdid()
-        let codexSign = RuntimeSigner.locateCodexSign()
+        let minisSign = RuntimeSigner.locateMinisSign()
         let entitlements = RuntimeSigner.entitlementsPlist()
         let entitlementCount = entitlements?.count ?? 0
-        if ldid != nil, codexSign != nil, entitlementCount > 0 {
+        if ldid != nil, minisSign != nil, entitlementCount > 0 {
             set("native-sign", .ok,
-                detail: String(format: AppLocalized("ldid + codex-sign · %ld entitlements to propagate"),
+                detail: String(format: AppLocalized("ldid + minis-sign · %ld entitlements to propagate"),
                                entitlementCount))
         } else if ldid != nil {
-            set("native-sign", .skipped(AppLocalized("codex-sign is not bundled")),
+            set("native-sign", .skipped(AppLocalized("minis-sign is not bundled")),
                 detail: String(format: AppLocalized("%ld entitlements · ad-hoc signing only"), entitlementCount))
         } else {
             set("native-sign", .failed(AppLocalized("ldid was not found")),

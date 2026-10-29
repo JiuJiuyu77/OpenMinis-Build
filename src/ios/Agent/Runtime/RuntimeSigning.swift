@@ -1,17 +1,17 @@
 //
 //  RuntimeSigning.swift
-//  Minis — 运行时二进制的签名层（ldid → codex-sign）
+//  Minis — 运行时二进制的签名层（ldid → minis-sign）
 //
 //  背景：装好的运行时里全是 Mach-O（clang、ld64、bash、NodeMobile.framework…）。
 //  只把文件落到磁盘是不够的，iOS 要真的执行它们，签名必须满足两层：
 //
 //    1. ldid -S<entitlements>   写入 entitlements + adhoc 签名；
-//    2. codex-sign              在 adhoc 签名之上补 App Store 形态的 CodeDirectory
+//    2. minis-sign              在 adhoc 签名之上补 App Store 形态的 CodeDirectory
 //                               （TeamID + cdhashes），否则 AMFI 不认这个结构，
 //                               表现为 Bad executable / Killed: 9。
 //
 //  只做第 1 步是「签名残缺」：dlopen/posix_spawn 能过一部分检查，但一执行就被杀。
-//  codex-sign 是 App 自带工具（`Helpers/codex-sign`，TrollStore 的 CoreTrust 路径），
+//  minis-sign 是 App 自带工具（`Helpers/minis-sign`，TrollStore 的 CoreTrust 路径），
 //  ldid 由 Theos 运行时提供。
 //
 //  权限来源：不硬编码一份 plist，而是从本进程的签名里挑出「让子进程可执行」的那几条
@@ -25,9 +25,9 @@ import Foundation
 /// 一次签名作业的结论。
 struct RuntimeSignReport: Codable, Equatable {
     enum Status: String, Codable {
-        /// 全部目标都过了 ldid + codex-sign。
+        /// 全部目标都过了 ldid + minis-sign。
         case signed
-        /// 只有 adhoc 签名（本机没有 codex-sign），能过一部分检查但可能被 AMFI 杀掉。
+        /// 只有 adhoc 签名（本机没有 minis-sign），能过一部分检查但可能被 AMFI 杀掉。
         case adhocOnly
         /// 不需要 / 无法签名（沙盒环境、或该运行时没有 sign_paths）。
         case skipped
@@ -50,7 +50,7 @@ struct RuntimeSignReport: Codable, Equatable {
     var shortSummary: String {
         switch status {
         case .signed:
-            return AppLocalized("Signed (ldid + codex-sign)") + " · \(signedCount)"
+            return AppLocalized("Signed (ldid + minis-sign)") + " · \(signedCount)"
         case .adhocOnly:
             return AppLocalized("Ad-hoc signed only") + (reason.map { " · \($0)" } ?? "")
         case .skipped:
@@ -107,9 +107,9 @@ enum RuntimeSigner {
                                      ldidPath: nil, codexSignPath: nil, checkedAt: Date())
         }
         let ldid = locateLdid()
-        let codexSign = locateCodexSign()
-        guard ldid != nil || codexSign != nil else {
-            return .failed(AppLocalized("Neither ldid nor codex-sign was found."))
+        let minisSign = locateMinisSign()
+        guard ldid != nil || minisSign != nil else {
+            return .failed(AppLocalized("Neither ldid nor minis-sign was found."))
         }
         guard let entitlements = entitlementsPlist() else {
             return .failed(AppLocalized("This app is not signed with native entitlements, so runtime binaries cannot be made executable."),
@@ -127,7 +127,7 @@ enum RuntimeSigner {
             let name = target.lastPathComponent
 
             // 1. 第一段签名：优先 ldid（能写 entitlements）；Theos 运行时的 ldid
-            //    自己也可能还没签名（引导期），那就让 codex-sign 先做一次 adhoc。
+            //    自己也可能还没签名（引导期），那就让 minis-sign 先做一次 adhoc。
             var adhocDone = false
             if let ldid {
                 let ldidArguments = isAdhocOnly || entitlements.isEmpty
@@ -141,8 +141,8 @@ enum RuntimeSigner {
                 lastOutput = ldidResult.output
                 adhocDone = ldidResult.spawnError == nil && ldidResult.status == 0
             }
-            if !adhocDone, let codexSign {
-                let bootstrap = RuntimeProbeRunner.run(executable: codexSign.path,
+            if !adhocDone, let minisSign {
+                let bootstrap = RuntimeProbeRunner.run(executable: minisSign.path,
                                                        arguments: ["--adhoc-only", target.path],
                                                        environment: ProcessInfo.processInfo.environment,
                                                        workingDirectory: root.path,
@@ -155,8 +155,8 @@ enum RuntimeSigner {
                 continue
             }
 
-            // 2. codex-sign：补 App Store 形态的 CodeDirectory。
-            guard let codexSign else {
+            // 2. minis-sign：补 App Store 形态的 CodeDirectory。
+            guard let minisSign else {
                 signed += 1 // adhoc 已成功，整体降级为 adhocOnly
                 continue
             }
@@ -167,7 +167,7 @@ enum RuntimeSigner {
                 codexArguments.append(contentsOf: ["--entitlements", plistURL.path])
             }
             codexArguments.append(target.path)
-            let codexResult = RuntimeProbeRunner.run(executable: codexSign.path,
+            let codexResult = RuntimeProbeRunner.run(executable: minisSign.path,
                                                      arguments: codexArguments,
                                                      environment: ProcessInfo.processInfo.environment,
                                                      workingDirectory: root.path,
@@ -184,20 +184,20 @@ enum RuntimeSigner {
 
         if !failed.isEmpty {
             let snippet = lastOutput.split(separator: "\n").suffix(3).joined(separator: " | ")
-            return RuntimeSignReport(status: .failed, mode: codexSign == nil ? "ldid" : "ldid+codex-sign",
+            return RuntimeSignReport(status: .failed, mode: minisSign == nil ? "ldid" : "ldid+minis-sign",
                                      signedCount: signed, failedPaths: failed,
                                      reason: snippet.isEmpty
                                         ? AppLocalized("Signing failed.")
                                         : String(snippet.prefix(400)),
-                                     ldidPath: ldid?.path, codexSignPath: codexSign?.path, checkedAt: Date())
+                                     ldidPath: ldid?.path, codexSignPath: minisSign?.path, checkedAt: Date())
         }
-        let mode = codexSign == nil ? "ldid" : "ldid+codex-sign"
-        let status: RuntimeSignReport.Status = codexSign == nil ? .adhocOnly : .signed
+        let mode = minisSign == nil ? "ldid" : "ldid+minis-sign"
+        let status: RuntimeSignReport.Status = minisSign == nil ? .adhocOnly : .signed
         return RuntimeSignReport(status: status, mode: mode, signedCount: signed, failedPaths: [],
-                                 reason: codexSign == nil
-                                    ? AppLocalized("codex-sign is not bundled, so the App Store-style CodeDirectory is missing.")
+                                 reason: minisSign == nil
+                                    ? AppLocalized("minis-sign is not bundled, so the App Store-style CodeDirectory is missing.")
                                     : nil,
-                                 ldidPath: ldid?.path, codexSignPath: codexSign?.path, checkedAt: Date())
+                                 ldidPath: ldid?.path, codexSignPath: minisSign?.path, checkedAt: Date())
     }
 
     /// 给**构建产物**签名（NativeBuild 的 dylib / 打壳后的 App 主二进制）。
@@ -227,7 +227,7 @@ enum RuntimeSigner {
                                      reason: AppLocalized("ldid was not found. Install the Theos runtime first."),
                                      ldidPath: nil, codexSignPath: nil, checkedAt: Date())
         }
-        let codexSign = locateCodexSign()
+        let minisSign = locateMinisSign()
         let entitlements = adhocOnly ? nil : entitlementsPlist()
         let plistURL = entitlements.flatMap(writeTemporaryPlist)
         defer { if let plistURL { try? FileManager.default.removeItem(at: plistURL) } }
@@ -249,7 +249,7 @@ enum RuntimeSigner {
                 failed.append(target.lastPathComponent)
                 continue
             }
-            if let codexSign {
+            if let minisSign {
                 var arguments: [String] = []
                 if adhocOnly {
                     arguments.append("--adhoc-only")
@@ -257,7 +257,7 @@ enum RuntimeSigner {
                     arguments.append(contentsOf: ["--entitlements", plistURL.path])
                 }
                 arguments.append(target.path)
-                let codexResult = RuntimeProbeRunner.run(executable: codexSign.path,
+                let codexResult = RuntimeProbeRunner.run(executable: minisSign.path,
                                                          arguments: arguments,
                                                          environment: ProcessInfo.processInfo.environment,
                                                          workingDirectory: target.deletingLastPathComponent().path,
@@ -271,36 +271,36 @@ enum RuntimeSigner {
             signed += 1
         }
         if !failed.isEmpty {
-            return RuntimeSignReport(status: .failed, mode: codexSign == nil ? "ldid" : "ldid+codex-sign",
+            return RuntimeSignReport(status: .failed, mode: minisSign == nil ? "ldid" : "ldid+minis-sign",
                                      signedCount: signed, failedPaths: failed,
                                      reason: String(lastOutput.split(separator: "\n").suffix(3)
                                                     .joined(separator: " | ").prefix(400)),
-                                     ldidPath: ldid.path, codexSignPath: codexSign?.path, checkedAt: Date())
+                                     ldidPath: ldid.path, codexSignPath: minisSign?.path, checkedAt: Date())
         }
-        return RuntimeSignReport(status: codexSign == nil ? .adhocOnly : .signed,
-                                 mode: codexSign == nil ? "ldid" : "ldid+codex-sign",
+        return RuntimeSignReport(status: minisSign == nil ? .adhocOnly : .signed,
+                                 mode: minisSign == nil ? "ldid" : "ldid+minis-sign",
                                  signedCount: signed, failedPaths: [],
-                                 reason: codexSign == nil
-                                    ? AppLocalized("codex-sign is not bundled, so the App Store-style CodeDirectory is missing.")
+                                 reason: minisSign == nil
+                                    ? AppLocalized("minis-sign is not bundled, so the App Store-style CodeDirectory is missing.")
                                     : nil,
-                                 ldidPath: ldid.path, codexSignPath: codexSign?.path, checkedAt: Date())
+                                 ldidPath: ldid.path, codexSignPath: minisSign?.path, checkedAt: Date())
     }
 
     // MARK: - 工具定位
 
-    /// `codex-sign` 由 App 自带（`Helpers/codex-sign`）；运行时目录里也允许放一份。
-    static func locateCodexSign() -> URL? {
+    /// `minis-sign` 由 App 自带（`Helpers/minis-sign`）；运行时目录里也允许放一份。
+    static func locateMinisSign() -> URL? {
         let fm = FileManager.default
-        var candidates = [Bundle.main.bundleURL.appendingPathComponent("Helpers/codex-sign")]
+        var candidates = [Bundle.main.bundleURL.appendingPathComponent("Helpers/minis-sign")]
         for root in installedRuntimeRoots() {
-            candidates.append(root.appendingPathComponent("Helpers/codex-sign"))
-            candidates.append(root.appendingPathComponent("bin/codex-sign"))
-            candidates.append(root.appendingPathComponent("usr/bin/codex-sign"))
+            candidates.append(root.appendingPathComponent("Helpers/minis-sign"))
+            candidates.append(root.appendingPathComponent("bin/minis-sign"))
+            candidates.append(root.appendingPathComponent("usr/bin/minis-sign"))
         }
-        // 不重新打包也能用：把 codex-sign 丢进 App 的 Application Support 即可。
-        candidates.append(DeveloperRuntimePaths.root.appendingPathComponent("Helpers/codex-sign"))
-        candidates.append(URL(fileURLWithPath: "/var/jb/usr/bin/codex-sign"))
-        candidates.append(URL(fileURLWithPath: "/usr/bin/codex-sign"))
+        // 不重新打包也能用：把 minis-sign 丢进 App 的 Application Support 即可。
+        candidates.append(DeveloperRuntimePaths.root.appendingPathComponent("Helpers/minis-sign"))
+        candidates.append(URL(fileURLWithPath: "/var/jb/usr/bin/minis-sign"))
+        candidates.append(URL(fileURLWithPath: "/usr/bin/minis-sign"))
         return candidates.first { fm.isExecutableFile(atPath: $0.path) }
     }
 

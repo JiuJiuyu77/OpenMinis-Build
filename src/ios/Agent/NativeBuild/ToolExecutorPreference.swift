@@ -16,7 +16,7 @@
 //    * reuseExternalRuntime —— 复用 MT-Agent / CodexApp 的运行时目录是本项目
 //      早期的权宜之计。那条路在沙箱构建里 mmap 不了对方的 dylib，还会让
 //      「没装 Theos」显示成「已就绪」；现在运行时由本 App 自己安装、自检并
-//      用 ldid + codex-sign 签名（见 RuntimeSigning.swift），没有理由再借别人的。
+//      用 ldid + minis-sign 签名（见 RuntimeSigning.swift），没有理由再借别人的。
 //
 
 import Foundation
