@@ -178,28 +178,63 @@ struct NativeToolchain {
     static func candidateRoots() -> [URL] {
         var roots: [URL] = []
         var seen = Set<String>()
-        if let manual = manualRootPath {
-            roots.append(URL(fileURLWithPath: manual, isDirectory: true))
+        
+        func addIfUnique(_ url: URL) {
+            let path = url.standardizedFileURL.path
+            if seen.insert(path).inserted {
+                roots.append(url)
+            }
         }
-        // `installed/` 下每个运行时都是独立子目录，必须逐个子目录进候选，
-        // 否则只扫到 `installed` 这一层就停了。
-        let installed = FileManager.default.urls(for: .applicationSupportDirectory,
-                                                 in: .userDomainMask).first?
-            .appendingPathComponent("DeveloperRuntime/installed", isDirectory: true)
-        if let installed {
-            let children = (try? FileManager.default.contentsOfDirectory(
+        
+        // 1. 用户手动指定的根目录 (最高优先级)
+        if let manual = manualRootPath {
+            addIfUnique(URL(fileURLWithPath: manual, isDirectory: true))
+        }
+        
+        let fm = FileManager.default
+        let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        
+        // 2. DeveloperRuntime/installed/* (本 App 管理的运行时)
+        if let installed = appSupport?.appendingPathComponent("DeveloperRuntime/installed", isDirectory: true) {
+            let children = (try? fm.contentsOfDirectory(
                 at: installed, includingPropertiesForKeys: [.isDirectoryKey],
                 options: [.skipsHiddenFiles])) ?? []
             let runtimeDirs = children.filter {
                 (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
             }
-            roots.append(contentsOf: runtimeDirs)
+            runtimeDirs.forEach(addIfUnique)
         }
-        roots.append(Bundle.main.bundleURL.appendingPathComponent("NativeToolchain", isDirectory: true))
-        if let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            roots.append(support.appendingPathComponent("NativeToolchain", isDirectory: true))
+        
+        // 3. App bundle 内置 (TrollStore TIPA 可选分发)
+        addIfUnique(Bundle.main.bundleURL.appendingPathComponent("NativeToolchain", isDirectory: true))
+        
+        // 4. Application Support/NativeToolchain (手动安装)
+        if let support = appSupport {
+            addIfUnique(support.appendingPathComponent("NativeToolchain", isDirectory: true))
         }
-        return roots.filter { seen.insert($0.standardizedFileURL.path).inserted }
+        
+        // 5. CodexApp/MT-Agent 运行时目录 (复用已有工具链)
+        //    注意: MT 的 TheosRuntime 实际在 PreparedRuntimes/TheosRuntime/theos，
+        //    需要展开子目录才能找到 makefiles/common.mk
+        if let codexAppSupport = appSupport?.deletingLastPathComponent()
+            .appendingPathComponent("CodexApp", isDirectory: true) {
+            // PreparedRuntimes/*
+            let preparedRuntimes = codexAppSupport.appendingPathComponent("PreparedRuntimes", isDirectory: true)
+            if fm.fileExists(atPath: preparedRuntimes.path) {
+                let children = (try? fm.contentsOfDirectory(
+                    at: preparedRuntimes, includingPropertiesForKeys: [.isDirectoryKey],
+                    options: [.skipsHiddenFiles])) ?? []
+                children.forEach(addIfUnique)
+            }
+            
+            // RuntimeDownloads/Theos
+            addIfUnique(codexAppSupport.appendingPathComponent("RuntimeDownloads/Theos", isDirectory: true))
+            
+            // ManagedRuntime
+            addIfUnique(codexAppSupport.appendingPathComponent("ManagedRuntime", isDirectory: true))
+        }
+        
+        return roots
     }
 
     static func looksLikeTheos(_ url: URL) -> Bool {
@@ -537,6 +572,9 @@ struct NativeToolchain {
                                 Bundle.main.bundleURL.appendingPathComponent("NativeToolchain/bin/theos-helper")]
         for h in helperCandidates where FileManager.default.isExecutableFile(atPath: h.path) {
             env["CA_THEOS_HELPER"] = h.path
+            break
+        // 打包模式: forkless (iOS 上的 dpkg-deb 封装)
+        env["CA_THEOS_PACKAGE_MODE"] = "forkless"
             break
         }
         let tools: [String: String] = ["CA_THEOS_MAKE": "make", "CA_THEOS_CLANG": "clang",

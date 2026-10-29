@@ -1,0 +1,48 @@
+name: Disk space check
+
+# 在构建前检查磁盘空间,避免构建到一半因空间不足失败
+# 参考 MT Agent 诊断逻辑: warn 5GiB / fail 1GiB
+
+on:
+  workflow_call:
+    outputs:
+      available_gb:
+        description: "Available disk space in GB"
+        value: ${{ jobs.check.outputs.available_gb }}
+      status:
+        description: "ok, warning, or critical"
+        value: ${{ jobs.check.outputs.status }}
+
+jobs:
+  check:
+    name: Check available disk space
+    runs-on: ubuntu-latest
+    outputs:
+      available_gb: ${{ steps.check.outputs.available_gb }}
+      status: ${{ steps.check.outputs.status }}
+    steps:
+      - name: Check disk space
+        id: check
+        run: |
+          set -euo pipefail
+          
+          # 获取可用空间 (以 GB 为单位)
+          available=$(df -BG . | awk 'NR==2 {print $4}' | tr -d 'G')
+          echo "available_gb=$available" >> "$GITHUB_OUTPUT"
+          
+          # 判定状态
+          if [ "$available" -lt 1 ]; then
+            echo "status=critical" >> "$GITHUB_OUTPUT"
+            echo "::error::Critical: only ${available}GB available (< 1GB threshold)"
+            exit 1
+          elif [ "$available" -lt 5 ]; then
+            echo "status=warning" >> "$GITHUB_OUTPUT"
+            echo "::warning::Warning: only ${available}GB available (< 5GB threshold)"
+          else
+            echo "status=ok" >> "$GITHUB_OUTPUT"
+            echo "::notice::OK: ${available}GB available"
+          fi
+          
+          # 显示详细信息
+          echo "### Disk Usage" >> "$GITHUB_STEP_SUMMARY"
+          df -h . >> "$GITHUB_STEP_SUMMARY"
