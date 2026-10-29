@@ -80,7 +80,7 @@ static int preserve_attributes(const char *path, const struct stat *st) {
 static NSDictionary *read_entitlements(const char *path) {
     NSData *data = [NSData dataWithContentsOfFile:[NSString stringWithUTF8String:path]];
     if (!data) return nil;
-    NSPropertyListFormat format = NSPropertyListBinaryFormat;
+    NSPropertyListFormat format = NSPropertyListBinaryFormat_v1_0;
     NSError *error = nil;
     id value = [NSPropertyListSerialization propertyListWithData:data options:NSPropertyListImmutable format:&format error:&error];
     if (error || ![value isKindOfClass:[NSDictionary class]]) return nil;

@@ -179,17 +179,22 @@ jobs:
             | grep -q 'ok: staged' || { echo "build phase is not attached to a target" >&2; exit 1; }
           echo "ok: helper staging is wired"
 
-      - name: Helper staging is a no-op without binaries
+      - name: Helper staging must deliver the release helpers
         run: |
           set -euo pipefail
-          # 没有 Configs/Helpers 时，构建阶段脚本必须安静退出而不是失败。
+          # The checked-in release helpers must actually reach the app bundle:
+          # an empty staging step would silently reproduce the build-39 TIPA
+          # that shipped without any Helpers and could not run native tools.
           products=$(mktemp -d)
-          out=$(BUILT_PRODUCTS_DIR="$products" WRAPPER_NAME=Minis.app bash scripts/stage_app_helpers.sh)
-          echo "$out"
-          case "$out" in
-            *"nothing to stage"*) echo "ok: no-op path works" ;;
-            *) echo "unexpected output" >&2; exit 1 ;;
-          esac
+          BUILT_PRODUCTS_DIR="$products" WRAPPER_NAME=Minis.app bash scripts/stage_app_helpers.sh
+          dest="$products/Minis.app/Helpers"
+          test -x "$dest/codex-sign"
+          test -x "$dest/bash.real"
+          test "$(readlink "$dest/sh")" = "bash.real"
+          test -f "$dest/provenance.json"
+          test -f "$dest/Notices/Bash.txt"
+          file "$dest/codex-sign" | grep -q "Mach-O"
+          echo "ok: release helpers staged into the app bundle"
 
   native-process-smoke:
     name: Native process runner and linked C ABI execute
