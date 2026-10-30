@@ -86,7 +86,7 @@ struct MTDiagnosticsReport {
         let appBuild = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
         
         // 判断总体结论
-        let allItems = model.basic + model.project + model.optional + model.execution + model.runtimes
+        let allItems = model.basic + model.project + model.optional + model.nativeLayers
         let hasFailures = allItems.contains { if case .failed = $0.status { return true }; return false }
         let hasWarnings = allItems.contains { if case .skipped = $0.status { return true }; return false }
         let conclusion = hasFailures ? "存在问题" : (hasWarnings ? "部分功能不可用" : "核心能力正常")
@@ -111,19 +111,11 @@ struct MTDiagnosticsReport {
             items: convertItems(model.optional)
         ))
         
-        // 执行层（MT 1.1.0 新增）
-        if !model.execution.isEmpty {
+        // 执行层与运行时自检由诊断模型统一放在 nativeLayers 中。
+        if !model.nativeLayers.isEmpty {
             sections.append(Section(
-                title: "执行层",
-                items: convertItems(model.execution)
-            ))
-        }
-        
-        // 已安装运行时
-        if !model.runtimes.isEmpty {
-            sections.append(Section(
-                title: "已安装运行时",
-                items: convertItems(model.runtimes)
+                title: "执行层与运行时",
+                items: convertItems(model.nativeLayers)
             ))
         }
         

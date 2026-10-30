@@ -321,7 +321,7 @@ jobs:
           retention-days: 14
 
       - name: Upload dSYM (crash symbolication)
-        if: ${{ always() && inputs.mode != 'check' }}
+        if: ${{ always() && inputs.mode != 'check' && env.DSYM != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: Minis-dSYM
