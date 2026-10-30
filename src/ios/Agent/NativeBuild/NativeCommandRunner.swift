@@ -301,6 +301,36 @@ enum NativeCommandRunner {
     }
 }
 
+/// Shared by command execution, direct offload and installer probes. Root
+/// persona is a child-only spawn attribute; the app's own uid never changes.
+/// Ordinary macOS test hosts keep their current identity.
+enum NativeSpawnIdentity {
+    static func configure(_ attributes: inout posix_spawnattr_t?) -> Int32 {
+        #if os(iOS)
+        if geteuid() == 0 { return 0 }
+        guard MinisHostEnvironmentDetector.cached.hasNativeEntitlements else { return 0 }
+        typealias Persona = @convention(c) (UnsafeMutablePointer<posix_spawnattr_t?>, uid_t, UInt32) -> Int32
+        let handle = UnsafeMutableRawPointer(bitPattern: -2)
+        guard let persona = dlsym(handle, "posix_spawnattr_set_persona_np") else { return ENOTSUP }
+        typealias Identity = @convention(c) (UnsafeMutablePointer<posix_spawnattr_t?>, UInt32) -> Int32
+        let setPersona = unsafeBitCast(persona, to: Persona.self)
+        let personaResult = setPersona(&attributes, 99, 1)
+        guard personaResult == 0 else { return personaResult }
+        if let uid = dlsym(handle, "posix_spawnattr_set_persona_uid_np") {
+            let result = unsafeBitCast(uid, to: Identity.self)(&attributes, 0)
+            guard result == 0 else { return result }
+        }
+        if let gid = dlsym(handle, "posix_spawnattr_set_persona_gid_np") {
+            let result = unsafeBitCast(gid, to: Identity.self)(&attributes, 0)
+            guard result == 0 else { return result }
+        }
+        return 0
+        #else
+        return 0
+        #endif
+    }
+}
+
 /// 把字节流按行切分，避免多字节字符被截断。
 private final class LineCollector {
     private var buffer = Data()
