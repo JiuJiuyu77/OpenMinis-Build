@@ -398,7 +398,7 @@ TrollStore 的 CoreTrust 绕过路径。
 | 子进程身份 | 用运行时 shell 跑 `id -u; id -g; uname -m` | uid 必须是 0，否则报「子进程不是 root」 |
 | 文件系统边界 | 依次尝试在 `/tmp`、`/var/mobile/Library`、`/var/mobile/Media` 落文件，再尝试写 `/`、`/System/Library` | 前三个必须可写；后两个必须**不可写**（SSV 封签）；反过来可写才是异常 |
 | TCC 边界 | 尝试 `head -c 1` 读取短信、通话、TCC 数据库 | 三个都必须被拒；能读才是问题 |
-| 签名层 | `RuntimeSigner.locateLdid()` / `locateCodexSign()` / `entitlementsPlist()` | 二者齐备且有可传播 entitlements 才算 ok；缺 minis-sign 降级为 skipped 并说明只能 adhoc |
+| 签名层 | `RuntimeSigner.locateLdid()` / `locateMinisSign()` / `entitlementsPlist()` | 二者齐备且有可传播 entitlements 才算 ok；缺 minis-sign 降级为 skipped 并说明只能 adhoc |
 | 运行时自检 | 逐条读安装记录里的 `verification` / `signing` | 任一条 failed 即红；旧记录（没有这两个字段）标注「早于自检机制安装」 |
 
 这几项对应 MT 实测的那组事实：`uid=0 gid=0`、可写 `/tmp`·`Library`·`Media`、可枚举其它

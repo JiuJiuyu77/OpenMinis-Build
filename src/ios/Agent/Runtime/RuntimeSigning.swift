@@ -42,7 +42,7 @@ struct RuntimeSignReport: Codable, Equatable {
     let failedPaths: [String]
     let reason: String?
     let ldidPath: String?
-    let codexSignPath: String?
+    let minisSignPath: String?
     let checkedAt: Date
 
     var isAcceptable: Bool { status != .failed }
@@ -63,7 +63,7 @@ struct RuntimeSignReport: Codable, Equatable {
     static func failed(_ reason: String, paths: [String] = [],
                        ldid: String? = nil, codex: String? = nil) -> RuntimeSignReport {
         RuntimeSignReport(status: .failed, mode: nil, signedCount: 0, failedPaths: paths,
-                          reason: reason, ldidPath: ldid, codexSignPath: codex, checkedAt: Date())
+                          reason: reason, ldidPath: ldid, minisSignPath: codex, checkedAt: Date())
     }
 }
 
@@ -99,12 +99,12 @@ enum RuntimeSigner {
         guard !entitlementsTargets.isEmpty || !adhocTargets.isEmpty else {
             return RuntimeSignReport(status: .skipped, mode: nil, signedCount: 0, failedPaths: [],
                                      reason: AppLocalized("This runtime declares no binaries to sign."),
-                                     ldidPath: nil, codexSignPath: nil, checkedAt: Date())
+                                     ldidPath: nil, minisSignPath: nil, checkedAt: Date())
         }
         guard canExecuteNative else {
             return RuntimeSignReport(status: .skipped, mode: nil, signedCount: 0, failedPaths: [],
                                      reason: AppLocalized("Cannot run the signing tools in this environment."),
-                                     ldidPath: nil, codexSignPath: nil, checkedAt: Date())
+                                     ldidPath: nil, minisSignPath: nil, checkedAt: Date())
         }
         let ldid = locateLdid()
         let minisSign = locateMinisSign()
@@ -189,7 +189,7 @@ enum RuntimeSigner {
                                      reason: snippet.isEmpty
                                         ? AppLocalized("Signing failed.")
                                         : String(snippet.prefix(400)),
-                                     ldidPath: ldid?.path, codexSignPath: minisSign?.path, checkedAt: Date())
+                                     ldidPath: ldid?.path, minisSignPath: minisSign?.path, checkedAt: Date())
         }
         let mode = minisSign == nil ? "ldid" : "ldid+minis-sign"
         let status: RuntimeSignReport.Status = minisSign == nil ? .adhocOnly : .signed
@@ -197,7 +197,7 @@ enum RuntimeSigner {
                                  reason: minisSign == nil
                                     ? AppLocalized("minis-sign is not bundled, so the App Store-style CodeDirectory is missing.")
                                     : nil,
-                                 ldidPath: ldid?.path, codexSignPath: minisSign?.path, checkedAt: Date())
+                                 ldidPath: ldid?.path, minisSignPath: minisSign?.path, checkedAt: Date())
     }
 
     /// 给**构建产物**签名（NativeBuild 的 dylib / 打壳后的 App 主二进制）。
@@ -215,17 +215,17 @@ enum RuntimeSigner {
         guard !targets.isEmpty else {
             return RuntimeSignReport(status: .skipped, mode: nil, signedCount: 0, failedPaths: [],
                                      reason: AppLocalized("No Mach-O output to sign."),
-                                     ldidPath: nil, codexSignPath: nil, checkedAt: Date())
+                                     ldidPath: nil, minisSignPath: nil, checkedAt: Date())
         }
         guard executableHost else {
             return RuntimeSignReport(status: .skipped, mode: nil, signedCount: 0, failedPaths: [],
                                      reason: AppLocalized("Cannot run the signing tools in this environment."),
-                                     ldidPath: nil, codexSignPath: nil, checkedAt: Date())
+                                     ldidPath: nil, minisSignPath: nil, checkedAt: Date())
         }
         guard let ldid = locateLdid() else {
             return RuntimeSignReport(status: .skipped, mode: nil, signedCount: 0, failedPaths: [],
                                      reason: AppLocalized("ldid was not found. Install the Theos runtime first."),
-                                     ldidPath: nil, codexSignPath: nil, checkedAt: Date())
+                                     ldidPath: nil, minisSignPath: nil, checkedAt: Date())
         }
         let minisSign = locateMinisSign()
         let entitlements = adhocOnly ? nil : entitlementsPlist()
@@ -275,7 +275,7 @@ enum RuntimeSigner {
                                      signedCount: signed, failedPaths: failed,
                                      reason: String(lastOutput.split(separator: "\n").suffix(3)
                                                     .joined(separator: " | ").prefix(400)),
-                                     ldidPath: ldid.path, codexSignPath: minisSign?.path, checkedAt: Date())
+                                     ldidPath: ldid.path, minisSignPath: minisSign?.path, checkedAt: Date())
         }
         return RuntimeSignReport(status: minisSign == nil ? .adhocOnly : .signed,
                                  mode: minisSign == nil ? "ldid" : "ldid+minis-sign",
@@ -283,7 +283,7 @@ enum RuntimeSigner {
                                  reason: minisSign == nil
                                     ? AppLocalized("minis-sign is not bundled, so the App Store-style CodeDirectory is missing.")
                                     : nil,
-                                 ldidPath: ldid.path, codexSignPath: minisSign?.path, checkedAt: Date())
+                                 ldidPath: ldid.path, minisSignPath: minisSign?.path, checkedAt: Date())
     }
 
     // MARK: - 工具定位

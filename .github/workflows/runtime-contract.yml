@@ -178,3 +178,13 @@ jobs:
             *"nothing to stage"*) echo "ok: no-op path works" ;;
             *) echo "unexpected output" >&2; exit 1 ;;
           esac
+
+      - name: Native bootstrap helpers are bundled
+        run: |
+          set -euo pipefail
+          test -x Configs/Helpers/bash.real
+          test -x Configs/Helpers/minis-sign
+          test -x Configs/Helpers/ldid
+          file Configs/Helpers/bash.real Configs/Helpers/minis-sign Configs/Helpers/ldid \
+            | grep -q 'Mach-O'
+          echo "native bootstrap helpers are present"

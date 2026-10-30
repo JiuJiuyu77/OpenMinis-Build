@@ -7,7 +7,7 @@ here; the directory is empty in a plain checkout and the script is a no-op.
 | File | Why | Source |
 |---|---|---|
 | `bash.real` | The execution layer: a real bash (Darwin syscalls, `posix_spawn`), **not** the Linux busybox inside the iSH rootfs. Compiled binaries use it as `$SHELL`, so `make`, configure scripts and node-gyp work. | Build from bash upstream (`./configure --host=arm64-apple-ios`) or copy from a distribution build. |
-| `codex-sign` | The signing layer, second half: rewrites the signature superblob (TeamID + cdhashes) on top of an ad-hoc signature. `ldid` alone leaves binaries that AMFI kills with `Bad executable` / `Killed: 9`. | TrollStore / FastPathSign lineage; see `ThirdPartyNotices` in that distribution before redistributing. |
+| `minis-sign` | The signing layer, second half: rewrites the signature superblob (TeamID + cdhashes) on top of an ad-hoc signature. `ldid` alone leaves binaries that AMFI kills with `Bad executable` / `Killed: 9`. | TrollStore / FastPathSign lineage; see `ThirdPartyNotices` in that distribution before redistributing. |
 | `ca-filetool` (optional) | Single-binary coreutils (`cat`, `cp`, `rm`, `tar`, …). The staging script creates the aliases next to it. | Same distribution as `bash.real`. |
 | `ldid` (optional) | Only needed when the installed Theos runtime does not provide one; the signer looks in the runtime first. | Theos toolchain. |
 

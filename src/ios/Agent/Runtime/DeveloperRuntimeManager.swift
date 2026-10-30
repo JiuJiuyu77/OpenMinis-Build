@@ -477,12 +477,22 @@ final class DeveloperRuntimeManager: ObservableObject {
             throw RuntimeInstallError.extractionFailed(error.localizedDescription)
         }
 
-        // 3.5 自检：按清单的 required_paths + probe 在 staging 里先验一遍。
-        // 坏包（缺 devkit / 缺 framework / probe 起不来）在这里失败，不进 installed/，
-        // 也不覆盖上一份可用的安装 —— 换版本失败时用户仍然留着一个能编译的 Theos。
-        await manager.publish(id, .verifying)
-        // 30 秒缓存的探测结果：沙盒/侧载环境下 probe 记 skipped，而不是判坏包。
+        // 3.5 先签名再自检。刚下载的运行时通常是 adhoc/未签名的；如果先执行
+        // probe，posix_spawn 会在签名层之前直接返回 Bad executable，导致 Theos、
+        // CoreTools 等首装运行时全部失败。App 内置的 ldid + minis-sign 负责引导签名。
         let hostCanRunNative = MinisHostEnvironmentDetector.cached.canRunNativeBinaries
+        let signing = RuntimeSigner.signRuntime(descriptor: descriptor,
+                                                root: scratch,
+                                                canExecuteNative: hostCanRunNative)
+        guard signing.isAcceptable else {
+            try? fm.removeItem(at: scratch)
+            throw RuntimeInstallError.installFailed(signing.reason ?? AppLocalized("Signing failed."))
+        }
+
+        // 3.6 自检：按清单的 required_paths + probe 在已签名 staging 里验证。
+        // 坏包（缺 devkit / 缺 framework / probe 起不来）不进 installed/，
+        // 也不覆盖上一份可用的安装。
+        await manager.publish(id, .verifying)
         let verification = await RuntimeInstallVerifier.verify(
             descriptor: descriptor,
             root: scratch,
@@ -500,17 +510,6 @@ final class DeveloperRuntimeManager: ObservableObject {
             }
             throw RuntimeInstallError.installFailed(
                 parts.isEmpty ? AppLocalized("Runtime self-check failed.") : parts.joined(separator: " — "))
-        }
-
-        // 3.6 签名：ldid 写 entitlements，再让 minis-sign 补 App Store 形态的
-        // CodeDirectory。运行时里全是 Mach-O，只做 ldid 会在执行时被杀
-        // （Bad executable / Killed: 9）；两者都缺时降级为 adhoc 并在记录里说明。
-        let signing = RuntimeSigner.signRuntime(descriptor: descriptor,
-                                                root: scratch,
-                                                canExecuteNative: hostCanRunNative)
-        guard signing.isAcceptable else {
-            try? fm.removeItem(at: scratch)
-            throw RuntimeInstallError.installFailed(signing.reason ?? AppLocalized("Signing failed."))
         }
 
         await manager.publish(id, .finalizing)
