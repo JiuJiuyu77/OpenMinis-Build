@@ -22,7 +22,8 @@ import Foundation
 
 /// ObjC 可见的桥。由 `NativeOffloads/ConfigOffload.m` 里的
 /// `minis-runtime` handler 调用（见 runtime_offload_register）。
-@objc public final class MinisRuntimeOffloadBridge: NSObject {
+@objc(MinisRuntimeOffloadBridge)
+public final class MinisRuntimeOffloadBridge: NSObject {
 
     /// 运行一个运行时工具。
     /// - Parameters:
@@ -30,11 +31,17 @@ import Foundation
     ///   - arguments: 传给工具的完整参数（不含 argv[0]）。
     ///   - stdin/stdout/stderr: guest 侧接过来的文件描述符。
     /// - Returns: 进程退出码（127 = 工具不存在，126 = 无法启动）。
-    @objc public static func runTool(_ tool: String,
+    @objc(runTool:arguments:inputFD:outputFD:errorFD:)
+    public static func runTool(_ tool: String,
                                      arguments: [String],
                                      stdin stdinFD: Int32,
                                      stdout stdoutFD: Int32,
                                      stderr stderrFD: Int32) -> Int32 {
+        guard !tool.isEmpty, !tool.contains("/"), !tool.utf8.contains(0),
+              arguments.allSatisfy({ !$0.utf8.contains(0) }) else {
+            writeLine(stderrFD, "minis-runtime: invalid tool name or NUL in arguments")
+            return 2
+        }
         let chain = NativeToolchain.shared
         let executable: String?
         if tool == "shell" {
@@ -55,10 +62,23 @@ import Foundation
 
         var attr: posix_spawnattr_t?
         posix_spawnattr_init(&attr)
+        // iSH may block signals on its emulation thread. Do not pass that mask
+        // (or the app's ignored SIGPIPE disposition) into native tools.
+        var mask = sigset_t()
+        sigemptyset(&mask)
+        posix_spawnattr_setsigmask(&attr, &mask)
+        var defaults = sigset_t()
+        sigemptyset(&defaults)
+        for signal in [SIGPIPE, SIGINT, SIGTERM, SIGHUP, SIGQUIT] {
+            sigaddset(&defaults, signal)
+        }
+        posix_spawnattr_setsigdefault(&attr, &defaults)
+        posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF))
 
-        var argv: [String] = [path] + arguments
+        let argv: [String] = [path] + arguments
         var envPairs: [String] = []
-        for (key, value) in chain.environment() {
+        for (key, value) in chain.environment()
+            where !key.isEmpty && !key.contains("=") && !key.utf8.contains(0) && !value.utf8.contains(0) {
             envPairs.append("\(key)=\(value)")
         }
 
@@ -73,10 +93,15 @@ import Foundation
             posix_spawnattr_destroy(&attr)
         }
 
+        let identityError = NativeSpawnIdentity.configure(&attr)
+        guard identityError == 0 else {
+            writeLine(stderrFD, "minis-runtime: root persona configuration failed (\(identityError))")
+            return 126
+        }
         var pid: pid_t = 0
         let rc = posix_spawn(&pid, path, &actions, &attr, &cArgs, &cEnv)
         guard rc == 0, pid > 0 else {
-            writeLine(stderrFD, "minis-runtime: 无法启动 \(path)（posix_spawn 返回 \(rc)）。这台设备可能没有 no-sandbox / platform-application 权限。")
+            writeLine(stderrFD, "minis-runtime: \(path): \(NativeCommandRunner.describeSpawnFailure(rc))")
             return 126
         }
 
@@ -85,7 +110,9 @@ import Foundation
             let waited = waitpid(pid, &status, 0)
             if waited == pid { break }
             if waited == -1 && errno == EINTR { continue }
-            break
+            let waitError = errno
+            writeLine(stderrFD, "minis-runtime: waitpid failed (\(waitError))")
+            return 126
         }
         if (status & 0x7f) == 0 {
             return (status >> 8) & 0xff
@@ -100,4 +127,26 @@ import Foundation
             write(fd, pointer, strlen(pointer))
         }
     }
+}
+
+// A real link-time reference from ConfigOffload.m keeps this entry alive in
+// Release builds. No NSClassFromString, selector inference or dlsym required.
+@_cdecl("minis_runtime_bridge_version")
+public func minisRuntimeBridgeVersion() -> Int32 { 1 }
+
+@_cdecl("minis_runtime_run_tool")
+public func minisRuntimeRunTool(_ argc: Int32,
+                                _ argv: UnsafePointer<UnsafeMutablePointer<CChar>?>?,
+                                _ inputFD: Int32,
+                                _ outputFD: Int32,
+                                _ errorFD: Int32) -> Int32 {
+    guard argc > 0, let argv, let first = argv[0],
+          let tool = String(validatingUTF8: first) else { return 2 }
+    var arguments: [String] = []
+    for index in 1..<Int(argc) {
+        guard let pointer = argv[index], let value = String(validatingUTF8: pointer) else { return 2 }
+        arguments.append(value)
+    }
+    return MinisRuntimeOffloadBridge.runTool(tool, arguments: arguments,
+        stdin: inputFD, stdout: outputFD, stderr: errorFD)
 }
