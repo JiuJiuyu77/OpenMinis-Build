@@ -197,6 +197,7 @@ extension WorkspaceGitTool {
         let action = (args["action"] as? String) ?? "status"
         guard let url = WorkspaceFileTool.resolve(raw), FileManager.default.fileExists(atPath: url.path) else { return ("Error: workspace not found at \(raw)", false) }
         guard FileManager.default.fileExists(atPath: url.appendingPathComponent(".git").path) else { return ("Error: no .git directory at \(url.path)", false) }
+        guard NativeToolchain.shared.findTool("git") != nil else { return ("Error: native git is not installed in the runtime", false) }
         guard let command = command(action: action, message: args["message"] as? String) else { return ("Error: commit requires a non-empty message", false) }
         let timeout = TimeInterval((args["timeout"] as? Int) ?? 30)
         let env = NativeToolchain.shared.environment(projectPath: url.path)
