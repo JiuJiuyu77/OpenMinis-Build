@@ -6,7 +6,7 @@
 #   bash.real    a real bash (Darwin syscalls + posix_spawn), NOT the Linux
 #                busybox inside the iSH rootfs. Compiled binaries call it as
 #                their shell, so scripts, `make` and node-gyp all work.
-#   codex-sign   App Store-style CodeDirectory signer (TeamID + cdhashes).
+#   minis-sign   App Store-style CodeDirectory signer (TeamID + cdhashes).
 #                `ldid` alone leaves the binary in a state AMFI rejects with
 #                `Bad executable` / `Killed: 9`.
 #   (optional)   ldid, when the Theos runtime does not provide one.
@@ -91,7 +91,7 @@ if [ -f "${DEST}/ca-filetool" ]; then
 fi
 
 # Ad-hoc sign what we just copied so the bundle's signature stays consistent.
-# The runtime re-signs its own binaries through ldid + codex-sign; this step
+# The runtime re-signs its own binaries through ldid + minis-sign; this step
 # only keeps the app bundle itself valid.
 if [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ] && command -v codesign >/dev/null 2>&1; then
   for file in "${DEST}"/*; do

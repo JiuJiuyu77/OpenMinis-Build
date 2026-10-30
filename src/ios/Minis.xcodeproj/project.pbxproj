@@ -85,6 +85,7 @@
 		DRT000105 /* RuntimeInstallSpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = DRT000414 /* RuntimeInstallSpec.swift */; };
 		DRT000106 /* RuntimeInstallVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = DRT000415 /* RuntimeInstallVerifier.swift */; };
 		DRT000107 /* RuntimeSigning.swift in Sources */ = {isa = PBXBuildFile; fileRef = DRT000416 /* RuntimeSigning.swift */; };
+		DRT000108 /* MTDiagnosticsReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = DRT000417 /* MTDiagnosticsReport.swift */; };
 		DRT000103 /* DeveloperRuntimeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DRT000203 /* DeveloperRuntimeManager.swift */; };
 		DRT000104 /* DeveloperRuntimeSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DRT000204 /* DeveloperRuntimeSettingsView.swift */; };
 		DRT000301 /* ICloudAvailability.swift in Sources */ = {isa = PBXBuildFile; fileRef = DRT000401 /* ICloudAvailability.swift */; };
@@ -883,6 +884,7 @@
 		DRT000409 /* OpenAICapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAICapabilities.swift; sourceTree = "<group>"; };
 		DRT000410 /* RuntimeCapabilityNames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeCapabilityNames.swift; sourceTree = "<group>"; };
 		DRT000412 /* RuntimeDiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeDiagnosticsView.swift; sourceTree = "<group>"; };
+		DRT000417 /* MTDiagnosticsReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTDiagnosticsReport.swift; sourceTree = "<group>"; };
 		BKP000217 /* BackupOpenRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupOpenRouter.swift; sourceTree = "<group>"; };
 		BKP000218 /* BackupSecretsImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupSecretsImporter.swift; sourceTree = "<group>"; };
 		BKP000219 /* BackupRestoreJournal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupRestoreJournal.swift; sourceTree = "<group>"; };
@@ -1890,6 +1892,7 @@
 				DRT000414 /* RuntimeInstallSpec.swift */,
 				DRT000415 /* RuntimeInstallVerifier.swift */,
 				DRT000416 /* RuntimeSigning.swift */,
+				DRT000417 /* MTDiagnosticsReport.swift */,
 				DRT000201 /* RuntimeTarGzExtractor.swift */,
 			);
 			path = Runtime;
@@ -3636,6 +3639,7 @@
 				DRT000105 /* RuntimeInstallSpec.swift in Sources */,
 				DRT000106 /* RuntimeInstallVerifier.swift in Sources */,
 				DRT000107 /* RuntimeSigning.swift in Sources */,
+				DRT000108 /* MTDiagnosticsReport.swift in Sources */,
 				DRT000103 /* DeveloperRuntimeManager.swift in Sources */,
 				DRT000104 /* DeveloperRuntimeSettingsView.swift in Sources */,
 				DRT000301 /* ICloudAvailability.swift in Sources */,

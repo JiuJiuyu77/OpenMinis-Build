@@ -112,13 +112,13 @@ jobs:
           grep -q "RuntimeSigner.signRuntime" src/ios/Agent/Runtime/DeveloperRuntimeManager.swift
           grep -q "RuntimeEnvironmentOverlay.build" src/ios/Agent/Runtime/DeveloperRuntimeManager.swift
           grep -q "installSpecOrNone" src/ios/Agent/Runtime/RuntimeManifest.swift
-          grep -q "codex-sign" src/ios/Agent/Runtime/RuntimeSigning.swift
+          grep -q "minis-sign" src/ios/Agent/Runtime/RuntimeSigning.swift
           grep -q "RuntimeSigner.signArtifacts" src/ios/Agent/NativeBuild/IPAShellPacker.swift
           grep -q "RuntimeSigner.signArtifacts" src/ios/Agent/NativeBuild/NativeBuildService.swift
           grep -q "CapabilityID.nodeRuntime" src/ios/Agent/Runtime/BuiltinCapabilities.swift
           grep -q "unsupportedHandlers" src/ios/Agent/Runtime/DeveloperRuntimeManager.swift
           grep -q "nativeLayers" src/ios/Views/Settings/RuntimeDiagnosticsView.swift
-          grep -q "RuntimeSigner.locateCodexSign" src/ios/Views/Settings/RuntimeDiagnosticsView.swift
+          grep -q "RuntimeSigner.locateMinisSign" src/ios/Views/Settings/RuntimeDiagnosticsView.swift
           # 借来的运行时目录必须保持删除状态（回归守卫）：
           if grep -rq "nativeToolchain.reuseExternalRuntime\|toolExecutor.preferCustomRuntime" src/ios --include=*.swift; then
             echo "borrowed-runtime switch is back in the executor" >&2
@@ -148,7 +148,7 @@ jobs:
         run: |
           set -euo pipefail
           # 脚本只有真被 Xcode 调用才有意义：没有这个 Run Script 阶段，
-          # 包里就没有 Helpers/bash.real 与 codex-sign，签名层只能退化成 adhoc。
+          # 包里就没有 Helpers/bash.real 与 minis-sign，签名层只能退化成 adhoc。
           project=src/ios/Minis.xcodeproj/project.pbxproj
           grep -q 'Stage App Helpers' "$project" \
             || { echo "Stage App Helpers build phase missing from the app target" >&2; exit 1; }
