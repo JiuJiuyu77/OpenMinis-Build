@@ -167,17 +167,16 @@ jobs:
             | grep -q 'ok: staged' || { echo "build phase is not attached to a target" >&2; exit 1; }
           echo "ok: helper staging is wired"
 
-      - name: Helper staging is a no-op without binaries
+      - name: Helper staging copies native bootstrap binaries
         run: |
           set -euo pipefail
-          # 没有 Configs/Helpers 时，构建阶段脚本必须安静退出而不是失败。
           products=$(mktemp -d)
           out=$(BUILT_PRODUCTS_DIR="$products" WRAPPER_NAME=Minis.app bash scripts/stage_app_helpers.sh)
           echo "$out"
-          case "$out" in
-            *"nothing to stage"*) echo "ok: no-op path works" ;;
-            *) echo "unexpected output" >&2; exit 1 ;;
-          esac
+          test -x "$products/Minis.app/Helpers/bash.real"
+          test -x "$products/Minis.app/Helpers/minis-sign"
+          test -x "$products/Minis.app/Helpers/ldid"
+          echo "ok: native bootstrap helpers staged"
 
       - name: Native bootstrap helpers are bundled
         run: |
