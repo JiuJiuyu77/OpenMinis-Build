@@ -55,8 +55,33 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: false
+          fetch-depth: 1
           lfs: true
+
+      # Keep iSH/proot git objects between macOS runners. The source checkout
+      # is shallow; only the pinned gitlink revisions are initialized here.
+      - name: Read pinned gitlink revisions
+        id: gitlinks
+        run: |
+          echo "ish=$(git rev-parse HEAD:deps/ish)" >> "$GITHUB_OUTPUT"
+          echo "proot=$(git rev-parse HEAD:deps/proot)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache git submodules
+        uses: actions/cache@v4
+        with:
+          path: |
+            .git/modules/deps/ish
+            .git/modules/deps/proot
+          key: git-submodules-${{ runner.os }}-${{ runner.arch }}-${{ steps.gitlinks.outputs.ish }}-${{ steps.gitlinks.outputs.proot }}
+          restore-keys: |
+            git-submodules-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Initialize pinned submodules
+        run: |
+          set -euo pipefail
+          git submodule sync --recursive
+          git submodule update --init --recursive --depth=1
 
       - name: Select Xcode
         run: |

@@ -173,6 +173,21 @@ enum NativeCommandRunner {
             posix_spawnattr_init(&attr)
             posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGDEF))
             posix_spawnattr_setpgroup(&attr, 0)
+
+            // Apply the root persona to every native child, not only the
+            // minis-runtime bridge. The old path configured it in one bridge
+            // but omitted the normal build runner, so `make`/`clang`/an
+            // arbitrary user-selected binary still inherited the app uid.
+            let identityError = NativeSpawnIdentity.configure(&attr)
+            if identityError != 0 {
+                posix_spawn_file_actions_destroy(&actions)
+                posix_spawnattr_destroy(&attr)
+                close(outPipe[0])
+                close(outPipe[1])
+                lastErrno = identityError
+                spawnFailures.append((shell: shell, code: identityError))
+                continue
+            }
             var defaults = sigset_t()
             sigemptyset(&defaults)
             posix_spawnattr_setsigdefault(&attr, &defaults)

@@ -19,6 +19,7 @@ on:
   push:
     paths:
       - "scripts/check_runtime_manifest.py"
+      - "scripts/test_mt_runtime_recovery.py"
       - "src/ios/Agent/Runtime/**"
       - "src/ios/Agent/NativeBuild/**"
       - "src/ios/Views/Settings/DeveloperRuntimeSettingsView.swift"
@@ -29,6 +30,7 @@ on:
   pull_request:
     paths:
       - "scripts/check_runtime_manifest.py"
+      - "scripts/test_mt_runtime_recovery.py"
       - "src/ios/Agent/Runtime/**"
       - "src/ios/Agent/NativeBuild/**"
       - "src/ios/Views/Settings/DeveloperRuntimeSettingsView.swift"

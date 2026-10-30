@@ -16,6 +16,8 @@
 
 import SwiftUI
 
+private let runtimeDiagnosticsLogger = AppLogger(category: "RuntimeDiagnostics")
+
 // MARK: - 记录里的结论文案
 
 /// 安装记录里的自检/签名结论 → 人能读的一句话。
@@ -70,6 +72,10 @@ final class RuntimeDiagnosticsModel: ObservableObject {
     @Published private(set) var running = false
     @Published private(set) var elapsed: TimeInterval = 0
     @Published private(set) var finishedAt: Date?
+    /// Compact, user-shareable trace for the latest MT-style runtime probe.
+    /// This is deliberately bounded so a noisy failed child cannot grow the UI
+    /// or the exported report without limit.
+    @Published private(set) var codexMTLog: [String] = []
 
     @Published var basic: [RuntimeDiagItem] = [
         .init(id: "kernel", title: AppLocalized("Sandbox kernel"), icon: "shippingbox.fill",
@@ -156,7 +162,9 @@ final class RuntimeDiagnosticsModel: ObservableObject {
         running = true
         finishedAt = nil
         elapsed = 0
+        codexMTLog = []
         let started = Date()
+        trace("diagnostic begin force=\(force) root=\(NativeToolchain.shared.rootPath.isEmpty ? "none" : NativeToolchain.shared.rootPath)")
         timerTask?.cancel()
         timerTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -170,6 +178,8 @@ final class RuntimeDiagnosticsModel: ObservableObject {
             timerTask = nil
             running = false
             finishedAt = Date()
+            elapsed = finishedAt?.timeIntervalSince(started) ?? elapsed
+            trace("diagnostic finished elapsed=\(String(format: "%.1f", elapsed))s failures=\(failedCount)")
         }
 
         for index in basic.indices { basic[index].status = .pending; basic[index].detail = "" }
@@ -399,18 +409,46 @@ final class RuntimeDiagnosticsModel: ObservableObject {
     }
 
     private func set(_ id: String, _ status: RuntimeDiagItem.Status, detail: String = "") {
+        var title = id
         for index in basic.indices where basic[index].id == id {
-            basic[index].status = status; basic[index].detail = detail; return
+            basic[index].status = status; basic[index].detail = detail; title = basic[index].title
+            traceResult(title, status: status, detail: detail); return
         }
         for index in project.indices where project[index].id == id {
-            project[index].status = status; project[index].detail = detail; return
+            project[index].status = status; project[index].detail = detail; title = project[index].title
+            traceResult(title, status: status, detail: detail); return
         }
         for index in optional.indices where optional[index].id == id {
-            optional[index].status = status; optional[index].detail = detail; return
+            optional[index].status = status; optional[index].detail = detail; title = optional[index].title
+            traceResult(title, status: status, detail: detail); return
         }
         for index in nativeLayers.indices where nativeLayers[index].id == id {
-            nativeLayers[index].status = status; nativeLayers[index].detail = detail; return
+            nativeLayers[index].status = status; nativeLayers[index].detail = detail; title = nativeLayers[index].title
+            traceResult(title, status: status, detail: detail); return
         }
+    }
+
+    private func trace(_ message: String) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        let line = "[\(formatter.string(from: Date()))] \(message)"
+        if codexMTLog.count >= 80 { codexMTLog.removeFirst(codexMTLog.count - 79) }
+        codexMTLog.append(line)
+        runtimeDiagnosticsLogger.info(line)
+    }
+
+    private func traceResult(_ title: String, status: RuntimeDiagItem.Status, detail: String) {
+        let marker: String
+        switch status {
+        case .ok: marker = "OK"
+        case .failed: marker = "FAIL"
+        case .skipped: marker = "SKIP"
+        case .running: marker = "RUN"
+        case .pending: marker = "PENDING"
+        }
+        let compact = detail.replacingOccurrences(of: "\n", with: " | ")
+        trace("\(marker) \(title)\(compact.isEmpty ? "" : " · \(compact)")")
     }
 
     /// 用运行时自带的 bash 跑一条命令（执行层实测）。
@@ -763,6 +801,24 @@ struct RuntimeDiagnosticsView: View {
                     Text(verbatim: line)
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(.secondary)
+                }
+                if !model.codexMTLog.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Label("Codex-MT runtime log", systemImage: "text.magnifyingglass")
+                                .font(.caption.weight(.semibold))
+                            Spacer()
+                            ShareLink(item: model.exportMTReport()) {
+                                Image(systemName: "square.and.arrow.up")
+                            }
+                            .accessibilityLabel("Export runtime diagnostic log")
+                        }
+                        Text(model.codexMTLog.joined(separator: "\n"))
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 TextField("Theos root path", text: $manualRoot)
                     .textInputAutocapitalization(.never)

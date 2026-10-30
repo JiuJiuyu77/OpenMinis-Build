@@ -328,11 +328,12 @@ enum RuntimeRepair {
             return RuntimeRepairReport(title: AppLocalized("Nothing to verify"), steps: steps, resolved: false)
         }
         var allPassed = true
+        let canExecuteNative = MinisHostEnvironmentDetector.cached.canRunNativeBinaries
         for descriptor in installed {
             let root = DeveloperRuntimePaths.runtimeRoot(id: descriptor.id)
             let report = await RuntimeInstallVerifier.verify(descriptor: descriptor,
                                                              root: root,
-                                                             canExecuteNative: true)
+                                                             canExecuteNative: canExecuteNative)
             manager.updateVerification(report, for: descriptor.id)
             steps.append("\(descriptor.id): \(report.status.rawValue)"
                          + (report.missingPaths.isEmpty ? "" : " · \(AppLocalized("missing")) \(report.missingPaths.count)")

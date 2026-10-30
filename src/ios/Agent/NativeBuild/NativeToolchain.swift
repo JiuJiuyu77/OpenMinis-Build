@@ -192,48 +192,27 @@ struct NativeToolchain {
         }
         
         let fm = FileManager.default
-        let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-        
-        // 2. DeveloperRuntime/installed/* (本 App 管理的运行时)
-        if let installed = appSupport?.appendingPathComponent("DeveloperRuntime/installed", isDirectory: true) {
-            let children = (try? fm.contentsOfDirectory(
-                at: installed, includingPropertiesForKeys: [.isDirectoryKey],
-                options: [.skipsHiddenFiles])) ?? []
-            let runtimeDirs = children.filter {
-                (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
-            }
-            runtimeDirs.forEach(addIfUnique)
-        }
-        
-        // 3. App bundle 内置 (TrollStore TIPA 可选分发)
+        // Runtime installation selects the writable bundle-adjacent store on
+        // TrollStore/jailbreak and Application Support only as a sandbox
+        // fallback. Do not rediscover a different root here: that was the
+        // source of "installed but not found" after download.
+        try? DeveloperRuntimePaths.ensureDirectories()
+        let installed = DeveloperRuntimePaths.installedRoot
+        let children = (try? fm.contentsOfDirectory(
+            at: installed, includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles])) ?? []
+        children.filter {
+            (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+        }.forEach(addIfUnique)
+
+        // App-bundled toolchain files and a manually copied fallback remain
+        // valid, but never take precedence over a verified managed runtime.
         addIfUnique(Bundle.main.bundleURL.appendingPathComponent("NativeToolchain", isDirectory: true))
-        
-        // 4. Application Support/NativeToolchain (手动安装)
+        let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
         if let support = appSupport {
             addIfUnique(support.appendingPathComponent("NativeToolchain", isDirectory: true))
         }
-        
-        // 5. CodexApp/MT-Agent 运行时目录 (复用已有工具链)
-        //    注意: MT 的 TheosRuntime 实际在 PreparedRuntimes/TheosRuntime/theos，
-        //    需要展开子目录才能找到 makefiles/common.mk
-        if let codexAppSupport = appSupport?.deletingLastPathComponent()
-            .appendingPathComponent("CodexApp", isDirectory: true) {
-            // PreparedRuntimes/*
-            let preparedRuntimes = codexAppSupport.appendingPathComponent("PreparedRuntimes", isDirectory: true)
-            if fm.fileExists(atPath: preparedRuntimes.path) {
-                let children = (try? fm.contentsOfDirectory(
-                    at: preparedRuntimes, includingPropertiesForKeys: [.isDirectoryKey],
-                    options: [.skipsHiddenFiles])) ?? []
-                children.forEach(addIfUnique)
-            }
-            
-            // RuntimeDownloads/Theos
-            addIfUnique(codexAppSupport.appendingPathComponent("RuntimeDownloads/Theos", isDirectory: true))
-            
-            // ManagedRuntime
-            addIfUnique(codexAppSupport.appendingPathComponent("ManagedRuntime", isDirectory: true))
-        }
-        
+
         return roots
     }
 
@@ -566,17 +545,19 @@ struct NativeToolchain {
             }
         }
         dylibPaths.append(contentsOf: ["/var/jb/usr/lib", "/usr/lib"])
-        env["DYLD_FALLBACK_LIBRARY_PATH"] = dylibPaths.joined(separator: ":")
+        let dylibSearch = dylibPaths.joined(separator: ":")
+        env["DYLD_LIBRARY_PATH"] = dylibSearch
+        env["DYLD_FALLBACK_LIBRARY_PATH"] = dylibSearch
 
         let helperCandidates = [Bundle.main.bundleURL.appendingPathComponent("Helpers/theos-helper"),
                                 Bundle.main.bundleURL.appendingPathComponent("NativeToolchain/bin/theos-helper")]
         for h in helperCandidates where FileManager.default.isExecutableFile(atPath: h.path) {
             env["CA_THEOS_HELPER"] = h.path
             break
-        // 打包模式: forkless (iOS 上的 dpkg-deb 封装)
-        env["CA_THEOS_PACKAGE_MODE"] = "forkless"
-            break
         }
+        // 打包模式: forkless (iOS 上的 dpkg-deb 封装)。这不是 helper
+        // 是否存在的条件；MT 诊断要求 make package 始终走该路径。
+        env["CA_THEOS_PACKAGE_MODE"] = "forkless"
         let tools: [String: String] = ["CA_THEOS_MAKE": "make", "CA_THEOS_CLANG": "clang",
                                        "CA_THEOS_CLANGXX": "clang++", "CA_THEOS_DPKG_DEB": "dpkg-deb",
                                        "CA_THEOS_TAR": "tar", "CA_THEOS_GZIP": "gzip",
@@ -598,10 +579,9 @@ struct NativeToolchain {
     func findObfuscatingClang() -> String? {
         let fm = FileManager.default
         var roots: [URL] = []
-        if let installed = FileManager.default.urls(for: .applicationSupportDirectory,
-                                                    in: .userDomainMask).first?
-            .appendingPathComponent("DeveloperRuntime/installed", isDirectory: true),
-           let children = try? fm.contentsOfDirectory(at: installed,
+        try? DeveloperRuntimePaths.ensureDirectories()
+        let installed = DeveloperRuntimePaths.installedRoot
+        if let children = try? fm.contentsOfDirectory(at: installed,
                                                        includingPropertiesForKeys: nil,
                                                        options: [.skipsHiddenFiles]) {
             // 名字里含 ollvm 的优先，其余目录也会被扫到（提供就是 OLLVM）。

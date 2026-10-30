@@ -119,6 +119,18 @@ struct MTDiagnosticsReport {
                 items: convertItems(model.nativeLayers)
             ))
         }
+
+        // MT-Agent exposes the raw probe trace as part of its diagnostic
+        // payload. Keep the same evidence in Minis so a failed spawn or
+        // non-zero runtime probe is actionable instead of only showing a
+        // red summary row.
+        if !model.codexMTLog.isEmpty {
+            sections.append(Section(
+                title: "Codex-MT 运行诊断日志",
+                items: [Item(key: "runtime log", status: .ok,
+                             detail: model.codexMTLog.joined(separator: "\n"))]
+            ))
+        }
         
         return MTDiagnosticsReport(
             timestamp: finishedAt,

@@ -86,8 +86,9 @@ struct DeveloperRuntimeSettingsView: View {
 
             Section {
                 LabeledContent("Storage", value: DeveloperRuntimeManager.format(installedBytes))
+                LabeledContent("Runtime store", value: DeveloperRuntimePaths.root.path)
             } footer: {
-                Text("Runtimes are stored in the app's Application Support directory and are removed when the app is deleted.\nOnly verified archives are extracted. A failed or cancelled install removes its temporary download.")
+                Text("Runtimes are stored in Minis.app/ManagedRuntimes when the installation can write to the app bundle (TrollStore/jailbreak); ordinary sandbox builds use private Application Support. Only verified archives are extracted. Verified archives are retained for offline repair.")
             }
 
             if let theos = manager.runtimes.first(where: {

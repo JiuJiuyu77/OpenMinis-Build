@@ -5,15 +5,48 @@ private let logger = AppLogger(category: "Runtime")
 
 /// Layout of the on-disk runtime store.
 ///
-/// Deliberately under Application Support and *not* the App Group container:
-/// `MinisFileProvider` exposes the group's user-facing directories to iOS
-/// Files, and a 1GB toolchain is neither user content nor something the user
-/// should be able to move out from under a running compiler.
+/// Stored under the app bundle's `ManagedRuntimes/` directory when the
+/// installation can write there (TrollStore/jailbreak), otherwise under the
+/// app's private Application Support directory. It never uses the App Group:
+/// `MinisFileProvider` exposes that container as user-facing Files content, and
+/// a large toolchain must not be movable while a compiler is running.
 enum DeveloperRuntimePaths {
-    static var root: URL {
+    /// TrollStore/jailbreak builds can write beside the executable. Keeping the
+    /// managed tree here is important: the runtime is part of Minis.app's
+    /// installable state and must not accidentally land in another app's
+    /// Application Support (the old implementation did exactly that on some
+    /// launchers). App Store-style installs still fall back to Application
+    /// Support, which is the only writable location in a normal sandbox.
+    static var bundleRoot: URL {
+        Bundle.main.bundleURL.appendingPathComponent("ManagedRuntimes", isDirectory: true)
+    }
+
+    static var applicationSupportRoot: URL {
         let base = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent("DeveloperRuntime", isDirectory: true)
+    }
+
+    /// The active store. `ensureDirectories()` probes the bundle first and
+    /// records the result for the lifetime of this process, so all paths used
+    /// by download, install, records, signing and diagnostics stay identical.
+    private static var selectedRoot: URL?
+    private static let rootLock = NSLock()
+
+    static var root: URL {
+        rootLock.lock()
+        if let selectedRoot {
+            rootLock.unlock()
+            return selectedRoot
+        }
+        rootLock.unlock()
+        // Callers outside DeveloperRuntimeManager (manifest loading, signing,
+        // decompression) can reach this property before the singleton init.
+        // Resolve the store lazily so they cannot observe the unwritable bundle
+        // as if it were the active root.
+        try? ensureDirectories()
+        rootLock.lock(); defer { rootLock.unlock() }
+        return selectedRoot ?? applicationSupportRoot
     }
 
     static var installedRoot: URL { root.appendingPathComponent("installed", isDirectory: true) }
@@ -32,11 +65,85 @@ enum DeveloperRuntimePaths {
         installDirectory(id: id)
     }
 
+    /// Select a writable store and migrate a previous Application Support
+    /// install once. The migration is intentionally best-effort: an ordinary
+    /// sandbox continues using Application Support when the app bundle is
+    /// immutable, while TrollStore gets the MT-compatible `ManagedRuntimes`
+    /// layout without losing already downloaded runtimes.
     static func ensureDirectories() throws {
         let fm = FileManager.default
-        for url in [root, installedRoot, stagingRoot, downloadRoot] {
+        rootLock.lock()
+        defer { rootLock.unlock() }
+        if selectedRoot != nil {
+            return
+        }
+
+        do {
+            try createDirectories(at: bundleRoot, using: fm)
+            selectedRoot = bundleRoot
+            migrateLegacyStoreIfNeeded(from: applicationSupportRoot, to: bundleRoot, using: fm)
+        } catch {
+            try createDirectories(at: applicationSupportRoot, using: fm)
+            selectedRoot = applicationSupportRoot
+        }
+    }
+
+    private static func createDirectories(at base: URL, using fm: FileManager) throws {
+        for url in [base,
+                    base.appendingPathComponent("installed", isDirectory: true),
+                    base.appendingPathComponent("staging", isDirectory: true),
+                    base.appendingPathComponent("downloads", isDirectory: true)] {
             try fm.createDirectory(at: url, withIntermediateDirectories: true)
         }
+        // A write probe catches bundles that can be created but are read-only.
+        let probe = base.appendingPathComponent(".write-probe-\(UUID().uuidString)")
+        try Data().write(to: probe, options: .atomic)
+        try? fm.removeItem(at: probe)
+    }
+
+    private static func migrateLegacyStoreIfNeeded(from old: URL, to new: URL, using fm: FileManager) {
+        guard old.standardizedFileURL.path != new.standardizedFileURL.path,
+              fm.fileExists(atPath: old.path) else { return }
+        let oldInstalled = old.appendingPathComponent("installed", isDirectory: true)
+        let newInstalled = new.appendingPathComponent("installed", isDirectory: true)
+        guard let entries = try? fm.contentsOfDirectory(at: oldInstalled,
+                                                          includingPropertiesForKeys: nil,
+                                                          options: [.skipsHiddenFiles]) else { return }
+        for entry in entries {
+            let destination = newInstalled.appendingPathComponent(entry.lastPathComponent,
+                                                                   isDirectory: true)
+            guard !fm.fileExists(atPath: destination.path) else { continue }
+            do {
+                // Same-device app containers are normally on one volume, so a
+                // rename is O(1) even for a 1GB Theos tree. Copy only when a
+                // launcher puts the two containers on different volumes.
+                try fm.moveItem(at: entry, to: destination)
+            } catch {
+                do { try fm.copyItem(at: entry, to: destination) }
+                catch { logger.warning("Runtime migration skipped \(entry.lastPathComponent): \(error.localizedDescription)") }
+            }
+        }
+        let oldRecords = old.appendingPathComponent("installed.json")
+        let newRecords = new.appendingPathComponent("installed.json")
+        if !fm.fileExists(atPath: newRecords.path), fm.fileExists(atPath: oldRecords.path) {
+            do { try fm.moveItem(at: oldRecords, to: newRecords) }
+            catch { try? fm.copyItem(at: oldRecords, to: newRecords) }
+        }
+        // Preserve verified archives for offline restore too; interrupted
+        // staging is intentionally not migrated.
+        let oldDownloads = old.appendingPathComponent("downloads", isDirectory: true)
+        let newDownloads = new.appendingPathComponent("downloads", isDirectory: true)
+        if let cached = try? fm.contentsOfDirectory(at: oldDownloads,
+                                                     includingPropertiesForKeys: nil,
+                                                     options: [.skipsHiddenFiles]) {
+            for archive in cached {
+                let destination = newDownloads.appendingPathComponent(archive.lastPathComponent)
+                guard !fm.fileExists(atPath: destination.path) else { continue }
+                do { try fm.moveItem(at: archive, to: destination) }
+                catch { try? fm.copyItem(at: archive, to: destination) }
+            }
+        }
+        logger.notice("Runtime store selected at \(new.path); migrated legacy Application Support entries")
     }
 }
 
@@ -145,6 +252,11 @@ final class DeveloperRuntimeManager: ObservableObject {
     nonisolated static let manifestURL = RuntimeManifestLoader.defaultURL
 
     init() {
+        // Select the writable store before loading records. Without this early
+        // probe, a sandbox build could read the bundle path once, later fall
+        // back to Application Support for writes, and show a phantom
+        // "installed"/"not installed" state depending on which call ran first.
+        try? DeveloperRuntimePaths.ensureDirectories()
         records = Self.loadRecords()
     }
 
@@ -375,6 +487,13 @@ final class DeveloperRuntimeManager: ObservableObject {
     private func removeFromDisk(_ id: String) {
         let fm = FileManager.default
         try? fm.removeItem(at: DeveloperRuntimePaths.installDirectory(id: id))
+        if let cached = try? fm.contentsOfDirectory(at: DeveloperRuntimePaths.downloadRoot,
+                                                     includingPropertiesForKeys: nil,
+                                                     options: [.skipsHiddenFiles]) {
+            for archive in cached where archive.lastPathComponent.hasPrefix(id + "-") {
+                try? fm.removeItem(at: archive)
+            }
+        }
         records[id] = nil
         errors[id] = nil
         operations[id] = nil
@@ -398,7 +517,14 @@ final class DeveloperRuntimeManager: ObservableObject {
             .appendingPathComponent("\(id)-\(descriptor.version).\(ext)")
         let scratch = DeveloperRuntimePaths.stagingRoot
             .appendingPathComponent("\(id)-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: archive) }
+        var keepVerifiedArchive = false
+        defer {
+            // MT keeps a verified package beside the managed runtime so an app
+            // replacement/offline repair can restore without downloading again.
+            // Only failed or cancelled attempts are removed.
+            if !keepVerifiedArchive { try? fm.removeItem(at: archive) }
+        }
+        logger.notice("Runtime install begin id=\(id) store=\(DeveloperRuntimePaths.root.path) archive=\(archive.path)")
         // A failed or cancelled run must not leave a half-extracted tree in
         // staging: it is invisible in the UI but still consumes ~1GB.
         defer { try? fm.removeItem(at: scratch) }
@@ -408,8 +534,26 @@ final class DeveloperRuntimeManager: ObservableObject {
         // runtime that cannot be fetched is the only failure the user sees.
         await manager.publish(id, .downloading(fraction: 0, bytesWritten: 0,
                                                totalBytes: descriptor.downloadBytes))
+        let expected = descriptor.archiveSHA256.lowercased()
         var digest = ""
+        // A checksum-verified archive is intentionally retained in the managed
+        // app directory. Reuse it on reinstall/update so offline repair does
+        // not start a second 200MB download.
+        let cachedSize = (try? fm.attributesOfItem(atPath: archive.path))?[.size] as? Int64
+        if fm.fileExists(atPath: archive.path),
+           let cachedSize,
+           (descriptor.downloadSize == nil || cachedSize == descriptor.downloadSize),
+           let cachedDigest = try? Self.sha256File(archive),
+           cachedDigest == expected {
+            digest = cachedDigest
+            keepVerifiedArchive = true
+            logger.notice("Runtime archive cache hit id=\(id) size=\(cachedSize)")
+        } else if fm.fileExists(atPath: archive.path) {
+            logger.warning("Runtime archive cache invalidated id=\(id)")
+            try? fm.removeItem(at: archive)
+        }
         var lastError: Error?
+        if digest.isEmpty {
         for candidate in downloadCandidates(archiveURL) {
             try Task.checkCancellation()
             // A different mirror serves the same bytes, but a partial left by
@@ -438,6 +582,7 @@ final class DeveloperRuntimeManager: ObservableObject {
                 logger.warning("Runtime download failed (\(candidate.absoluteString)): \(error.localizedDescription)")
             }
         }
+        }
         if let lastError { throw lastError }
         guard !digest.isEmpty else {
             throw RuntimeInstallError.installFailed("empty archive")
@@ -445,10 +590,12 @@ final class DeveloperRuntimeManager: ObservableObject {
 
         // 2. Verify before doing any unpacking work.
         await manager.publish(id, .verifying)
-        let expected = descriptor.archiveSHA256.lowercased()
         guard digest == expected else {
+            logger.error("Runtime archive checksum mismatch id=\(id) expected=\(expected.prefix(12)) actual=\(digest.prefix(12))")
             throw RuntimeInstallError.checksumMismatch(expected: expected, actual: digest)
         }
+        keepVerifiedArchive = true
+        logger.notice("Runtime archive verified id=\(id) sha256=\(digest.prefix(12)) cached=\(archive.path)")
 
         // 3. Extract into staging, then swap in.
         await manager.publish(id, .extracting(fraction: 0, entries: 0))
@@ -498,6 +645,7 @@ final class DeveloperRuntimeManager: ObservableObject {
             root: scratch,
             canExecuteNative: hostCanRunNative)
         guard verification.isAcceptable else {
+            logger.error("Runtime self-check failed id=\(id) status=\(verification.status.rawValue) exit=\(verification.probeExit.map { String($0) } ?? "none") reason=\(verification.reason ?? "none") output=\(verification.probeOutput ?? "")")
             try? fm.removeItem(at: scratch)
             var parts: [String] = []
             if let reason = verification.reason { parts.append(reason) }
@@ -905,6 +1053,18 @@ final class DeveloperRuntimeManager: ObservableObject {
         guard !missing.isEmpty else { return }
         for id in missing { records[id] = nil }
         saveRecords()
+    }
+
+    private nonisolated static func sha256File(_ url: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while true {
+            let chunk = try handle.read(upToCount: 1 << 20)
+            guard let chunk, !chunk.isEmpty else { break }
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     private nonisolated static func directorySize(_ url: URL) -> Int64 {

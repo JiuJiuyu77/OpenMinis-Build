@@ -74,17 +74,15 @@ enum ZstdDecompressor {
             "/var/jb/usr/lib/libzstd.1.dylib",
             "/usr/lib/libzstd.1.dylib",
         ]
-        let support = FileManager.default.urls(for: .applicationSupportDirectory,
-                                               in: .userDomainMask).first
-        if let installed = support?.appendingPathComponent("DeveloperRuntime/installed", isDirectory: true),
-           let children = try? FileManager.default.contentsOfDirectory(at: installed,
-                                                                      includingPropertiesForKeys: nil,
-                                                                      options: [.skipsHiddenFiles]) {
+        try? DeveloperRuntimePaths.ensureDirectories()
+        if let children = try? FileManager.default.contentsOfDirectory(
+            at: DeveloperRuntimePaths.installedRoot,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]) {
             for child in children {
                 paths.append(child.appendingPathComponent("usr/lib/libzstd.1.dylib").path)
             }
         }
-        paths.append("/var/mobile/Library/Application Support/CodexApp/PreparedRuntimes/TheosRuntime/usr/lib/libzstd.1.dylib")
         return paths
     }
 

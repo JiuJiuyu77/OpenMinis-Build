@@ -109,6 +109,23 @@ enum RuntimeInstallVerifier {
             let inherited = environment["PATH"] ?? "/usr/bin:/bin"
             environment["PATH"] = prefix + ":" + inherited
         }
+        // Direct probes do not pass through NativeCommandRunner, so they must
+        // receive the same runtime dylib search paths themselves. Without this
+        // a perfectly signed make/clang exits non-zero in staging because dyld
+        // cannot resolve libiosexec/libpcre, and installation is rejected.
+        let runtimeLibs = ["usr/lib", "lib", "usr/local/lib"].compactMap { rel -> String? in
+            let path = root.appendingPathComponent(rel, isDirectory: true).path
+            return FileManager.default.fileExists(atPath: path) ? path : nil
+        }
+        if !runtimeLibs.isEmpty {
+            let existing = environment["DYLD_LIBRARY_PATH"]
+            environment["DYLD_LIBRARY_PATH"] = runtimeLibs.joined(separator: ":")
+                + (existing.map { ":\($0)" } ?? "")
+            environment["DYLD_FALLBACK_LIBRARY_PATH"] = runtimeLibs.joined(separator: ":")
+        }
+        if let frameworks = Bundle.main.privateFrameworksPath {
+            environment["DYLD_FRAMEWORK_PATH"] = frameworks
+        }
 
         let result = RuntimeProbeRunner.run(executable: executable.path,
                                             arguments: probe.arguments,
@@ -172,6 +189,30 @@ enum RuntimeProbeRunner {
                     environment: [String: String],
                     workingDirectory: String,
                     timeout: TimeInterval) -> Result {
+        var environment = environment
+        // Signing tools and install probes are both launched directly through
+        // this runner (not NativeCommandRunner), so derive the runtime dylib
+        // directories from the executable path as a final safety net.
+        let executableURL = URL(fileURLWithPath: executable)
+        let executableDir = executableURL.deletingLastPathComponent()
+        let roots = [executableDir,
+                     executableDir.deletingLastPathComponent(),
+                     executableDir.deletingLastPathComponent().deletingLastPathComponent()]
+        var dylibPaths: [String] = []
+        for root in roots {
+            for rel in ["usr/lib", "lib", "usr/local/lib"] {
+                let path = root.appendingPathComponent(rel).path
+                if FileManager.default.fileExists(atPath: path), !dylibPaths.contains(path) {
+                    dylibPaths.append(path)
+                }
+            }
+        }
+        if !dylibPaths.isEmpty {
+            let prefix = dylibPaths.joined(separator: ":")
+            environment["DYLD_LIBRARY_PATH"] = prefix + (environment["DYLD_LIBRARY_PATH"].map { ":\($0)" } ?? "")
+            environment["DYLD_FALLBACK_LIBRARY_PATH"] = prefix + (environment["DYLD_FALLBACK_LIBRARY_PATH"].map { ":\($0)" } ?? "")
+        }
+
         var pipefds: [Int32] = [0, 0]
         guard pipe(&pipefds) == 0 else {
             return Result(status: -1, output: "", timedOut: false,
@@ -184,6 +225,17 @@ enum RuntimeProbeRunner {
         posix_spawn_file_actions_addopen(&fileActions, STDIN_FILENO, "/dev/null", O_RDONLY, 0)
         posix_spawn_file_actions_adddup2(&fileActions, pipefds[1], STDOUT_FILENO)
         posix_spawn_file_actions_adddup2(&fileActions, pipefds[1], STDERR_FILENO)
+        // The probe executable is absolute, but several runtime probes load
+        // relative manifests/shims. Set the requested cwd in the child rather
+        // than silently ignoring `workingDirectory` (which made valid probes
+        // exit non-zero after installation).
+        if let chdirSymbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2),
+                                   "posix_spawn_file_actions_addchdir_np") {
+            typealias AddChdir = @convention(c) (UnsafeMutablePointer<posix_spawn_file_actions_t?>,
+                                                  UnsafePointer<CChar>) -> Int32
+            let addChdir = unsafeBitCast(chdirSymbol, to: AddChdir.self)
+            _ = workingDirectory.withCString { addChdir(&fileActions, $0) }
+        }
 
         var attrs: posix_spawnattr_t? = nil
         posix_spawnattr_init(&attrs)
@@ -191,6 +243,13 @@ enum RuntimeProbeRunner {
         // 新进程组，超时才好一次杀干净。
         posix_spawnattr_setflags(&attrs, Int16(POSIX_SPAWN_SETPGROUP))
         posix_spawnattr_setpgroup(&attrs, 0)
+        let identityError = NativeSpawnIdentity.configure(&attrs)
+        guard identityError == 0 else {
+            close(pipefds[0])
+            close(pipefds[1])
+            return Result(status: -1, output: "", timedOut: false,
+                          spawnError: "root persona configuration failed (\(identityError): \(String(cString: strerror(identityError))))")
+        }
 
         var argv: [UnsafeMutablePointer<CChar>?] = ([executable] + arguments).map { strdup($0) }
         argv.append(nil)
