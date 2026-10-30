@@ -15,6 +15,8 @@ struct BuildProfile: Codable, Identifiable, Equatable {
     var scheme: String
     var archs: String
     var obfuscation: BuildObfuscation
+    var optimization: BuildOptimizationLevel
+    var sdkVersion: BuildSDKVersion
     var makeMode: NativeMakeMode
     var stripSymbols: Bool
     var hideSymbols: Bool
@@ -31,6 +33,8 @@ struct BuildProfile: Codable, Identifiable, Equatable {
          scheme: String = "rootless",
          archs: String = "arm64",
          obfuscation: BuildObfuscation = .off,
+         optimization: BuildOptimizationLevel = .speed,
+         sdkVersion: BuildSDKVersion = .sdk164,
          makeMode: NativeMakeMode = .project,
          stripSymbols: Bool = false,
          hideSymbols: Bool = false,
@@ -46,6 +50,8 @@ struct BuildProfile: Codable, Identifiable, Equatable {
         self.scheme = scheme
         self.archs = archs
         self.obfuscation = obfuscation
+        self.optimization = optimization
+        self.sdkVersion = sdkVersion
         self.makeMode = makeMode
         self.stripSymbols = stripSymbols
         self.hideSymbols = hideSymbols
@@ -56,6 +62,32 @@ struct BuildProfile: Codable, Identifiable, Equatable {
         self.jobs = jobs
         self.extraFlags = extraFlags
         self.createdAt = createdAt
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, scheme, archs, obfuscation, optimization, sdkVersion, makeMode,
+             stripSymbols, hideSymbols, encryptStrings, cleanBeforeBuild, packageOnly,
+             incremental, jobs, extraFlags, createdAt
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? "Profile"
+        scheme = try c.decodeIfPresent(String.self, forKey: .scheme) ?? "rootless"
+        archs = try c.decodeIfPresent(String.self, forKey: .archs) ?? "arm64"
+        obfuscation = try c.decodeIfPresent(BuildObfuscation.self, forKey: .obfuscation) ?? .off
+        optimization = try c.decodeIfPresent(BuildOptimizationLevel.self, forKey: .optimization) ?? .speed
+        sdkVersion = try c.decodeIfPresent(BuildSDKVersion.self, forKey: .sdkVersion) ?? .sdk164
+        makeMode = try c.decodeIfPresent(NativeMakeMode.self, forKey: .makeMode) ?? .project
+        stripSymbols = try c.decodeIfPresent(Bool.self, forKey: .stripSymbols) ?? false
+        hideSymbols = try c.decodeIfPresent(Bool.self, forKey: .hideSymbols) ?? false
+        encryptStrings = try c.decodeIfPresent(Bool.self, forKey: .encryptStrings) ?? false
+        cleanBeforeBuild = try c.decodeIfPresent(Bool.self, forKey: .cleanBeforeBuild) ?? false
+        packageOnly = try c.decodeIfPresent(Bool.self, forKey: .packageOnly) ?? false
+        incremental = try c.decodeIfPresent(Bool.self, forKey: .incremental) ?? true
+        jobs = try c.decodeIfPresent(Int.self, forKey: .jobs) ?? 4
+        extraFlags = try c.decodeIfPresent(String.self, forKey: .extraFlags) ?? ""
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
     }
 
     var summary: String {
@@ -141,6 +173,20 @@ struct ModelBuildProfileSettingsView: View {
                             .pickerStyle(.menu)
                         }
                         HStack {
+                            HStack {
+                                Text(AppLocalized("Optimization")).font(.caption)
+                                Spacer()
+                                Picker("", selection: $profile.optimization) {
+                                    ForEach(BuildOptimizationLevel.allCases) { level in Text(level.displayName).tag(level) }
+                                }.labelsHidden().pickerStyle(.menu)
+                            }
+                            HStack {
+                                Text(AppLocalized("SDK")).font(.caption)
+                                Spacer()
+                                Picker("", selection: $profile.sdkVersion) {
+                                    ForEach(BuildSDKVersion.allCases) { version in Text(version.displayName).tag(version) }
+                                }.labelsHidden().pickerStyle(.menu)
+                            }
                             Text(AppLocalized("Build file")).font(.caption)
                             Spacer()
                             Picker("", selection: $profile.makeMode) {
