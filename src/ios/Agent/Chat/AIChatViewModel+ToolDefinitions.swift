@@ -253,6 +253,11 @@ extension AIChatViewModel {
             tools.append(Self.userAskToolDefinition)
         }
 
+        // [Workspace] 本地工程分析、Git 和直接工作区编辑。
+        tools.append(contentsOf: WorkspaceFileTool.definitions)
+        tools.append(WorkspaceAnalysisTool.definition)
+        tools.append(WorkspaceGitTool.definition)
+
         // [NativeBuild] 原生工具链编译（不经过 iSH）
         tools.append(NativeBuildTool.definition)
 
