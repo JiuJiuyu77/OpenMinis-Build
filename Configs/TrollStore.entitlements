@@ -2,6 +2,15 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- MT-Agent uses these private entitlements for TrollStore execution.
+	     persona-mgmt is required by posix_spawnattr_set_persona_np(99, ...),
+	     which is how runtime tools are launched as root persona. -->
+	<key>com.apple.developer.kernel.extended-virtual-addressing</key>
+	<true/>
+	<key>com.apple.private.persona-mgmt</key>
+	<true/>
+	<key>com.apple.springboard.debugapplications</key>
+	<true/>
 	<key>application-identifier</key>
 	<string>com.openminis.app</string>
 	<key>com.apple.developer.team-identifier</key>
