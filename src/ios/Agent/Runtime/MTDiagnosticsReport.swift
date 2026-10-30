@@ -77,7 +77,8 @@ struct MTDiagnosticsReport {
     }
     
     /// 从诊断视图的状态构建报告
-    static func build(from model: RuntimeDiagnosticsModel, 
+    @MainActor
+    static func build(from model: RuntimeDiagnosticsModel,
                       elapsed: TimeInterval,
                       finishedAt: Date) -> MTDiagnosticsReport {
         let device = UIDevice.current.modelIdentifier
