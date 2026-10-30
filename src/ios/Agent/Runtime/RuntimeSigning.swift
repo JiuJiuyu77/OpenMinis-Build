@@ -93,8 +93,15 @@ enum RuntimeSigner {
                             timeout: TimeInterval = 180) -> RuntimeSignReport {
         let spec = descriptor.installSpecOrNone
         let targets = spec.signTargets(in: root)
-        let entitlementsTargets = targets.entitlements.map { root.appendingPathComponent($0) }
-        let adhocTargets = targets.adhoc.map { root.appendingPathComponent($0) }
+        let declaredEntitlementsTargets = targets.entitlements.map { root.appendingPathComponent($0) }
+        let declaredAdhocTargets = targets.adhoc.map { root.appendingPathComponent($0) }
+        let declared = Set((declaredEntitlementsTargets + declaredAdhocTargets).map(\.standardizedFileURL.path))
+        let discovered = discoverMachOFiles(in: root)
+            .filter { !declared.contains($0.standardizedFileURL.path) }
+        let discoveredAdhocTargets = discovered.filter { isDylibOrFramework($0) }
+        let discoveredEntitlementsTargets = discovered.filter { !isDylibOrFramework($0) }
+        let entitlementsTargets = declaredEntitlementsTargets + discoveredEntitlementsTargets
+        let adhocTargets = declaredAdhocTargets + discoveredAdhocTargets
 
         guard !entitlementsTargets.isEmpty || !adhocTargets.isEmpty else {
             return RuntimeSignReport(status: .skipped, mode: nil, signedCount: 0, failedPaths: [],
@@ -387,6 +394,27 @@ enum RuntimeSigner {
         defer { try? handle.close() }
         guard let magic = try? handle.read(upToCount: 4), magic.count == 4 else { return false }
         return machoMagics.contains([UInt8](magic))
+    }
+
+    private static func discoverMachOFiles(in root: URL) -> [URL] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
+            options: [.skipsHiddenFiles]) else { return [] }
+        return enumerator.compactMap { item in
+            guard let url = item as? URL,
+                  let values = try? url.resourceValues(forKeys: [.isRegularFileKey]),
+                  values.isRegularFile == true,
+                  isMachO(url) else { return nil }
+            return url
+        }
+    }
+
+    private static func isDylibOrFramework(_ url: URL) -> Bool {
+        let path = url.path
+        return url.pathExtension == "dylib"
+            || path.contains(".framework/")
+            || path.hasSuffix(".framework")
     }
 
     // MARK: - SecTask（dlsym，避免 Security 私有头）

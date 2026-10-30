@@ -277,10 +277,11 @@ final class RuntimeDiagnosticsModel: ObservableObject {
             let parts = identity.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
             if parts.count >= 2 {
                 let summary = "uid=\(parts[0]) gid=\(parts[1])" + (parts.count > 2 ? " · \(parts[2])" : "")
-                if parts[0] == "0" {
+                if parts[0] == "0" || host.canRunNativeBinaries {
                     set("native-spawn", .ok, detail: summary)
                 } else {
-                    set("native-spawn", .failed(AppLocalized("Child processes are not root")), detail: summary)
+                    set("native-spawn", .failed(AppLocalized("Native execution entitlements are missing")),
+                        detail: summary + " · " + host.nativeOutlook)
                 }
             } else if identity.contains("Every candidate shell failed") {
                 set("native-spawn", .failed(AppLocalized("No shell could be started on this device")),
