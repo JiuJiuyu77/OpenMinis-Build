@@ -94,11 +94,8 @@ jobs:
           set -euo pipefail
           cp src/ios/Configs/ProviderCustomization.xcconfig.example \
              src/ios/Configs/ProviderCustomization.xcconfig
-          cp src/android/app/provider-customization.properties.example \
-             src/android/app/provider-customization.properties || true
           # 生成的配置也要钉住 mtime，否则每次都会让上游 target 判脏
-          touch -t 200001010000 src/ios/Configs/ProviderCustomization.xcconfig \
-                                 src/android/app/provider-customization.properties || true
+          touch -t 200001010000 src/ios/Configs/ProviderCustomization.xcconfig
 
       - name: Setup Go (rclone needs the toolchain pinned by go.mod)
         uses: actions/setup-go@v5

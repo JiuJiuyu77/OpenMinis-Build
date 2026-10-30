@@ -139,8 +139,6 @@ jobs:
           set -euo pipefail
           cp src/ios/Configs/ProviderCustomization.xcconfig.example \
              src/ios/Configs/ProviderCustomization.xcconfig
-          cp src/android/app/provider-customization.properties.example \
-             src/android/app/provider-customization.properties
           # Empty values are valid: the app builds and runs, and only the
           # Claude-OAuth sign-in path needs ANTHROPIC_OAUTH_IDENTIFIER_PROMPT.
 
