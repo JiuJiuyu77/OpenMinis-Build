@@ -50,6 +50,10 @@ struct NativeBuildConfig {
     var timeout: TimeInterval = 1800
     /// 混淆强度（OLLVM）。`.off` 时不注入任何 -mllvm 参数。
     var obfuscation: BuildObfuscation = .off
+    /// 普通 LLVM 优化级别；与 OLLVM 混淆独立，不改变运行时逻辑。
+    var optimization: BuildOptimizationLevel = .speed
+    /// Theos SDK 版本；26.0 仅在运行时确实安装时启用。
+    var sdkVersion: BuildSDKVersion = .sdk164
     /// 追加到 CFLAGS/CXXFLAGS 的自定义参数（可视化里的“自定义编译参数”）。
     var cflags: String = ""
     /// 追加到 LDFLAGS 的自定义参数。
@@ -100,11 +104,12 @@ struct NativeBuildConfig {
         // also silently overrides nothing.
         _ = incremental
         if !archs.isEmpty { parts.append("ARCHS=\(archs)") }
+        parts.append("SDKVERSION=\(sdkVersion.rawValue)")
         if !target.isEmpty { parts.append("TARGET=\(target)") }
 
         // 混淆 + 自定义 CFLAGS 合并成一个变量：命令行上不支持 `VAR+=x`
         // （那是 makefile 内部语法），两个 `VAR=` 只会后者覆盖前者。
-        var allCFlags: [String] = []
+        var allCFlags: [String] = [optimization.compilerFlag]
         if obfuscation.requiresOLLVM {
             allCFlags.append(obfuscation.compilerFlags.joined(separator: " "))
         }
@@ -176,6 +181,8 @@ final class NativeBuildService: ObservableObject {
     @Published var cleanBeforeBuild: Bool
     @Published var extraFlags: String
     @Published var obfuscation: BuildObfuscation
+    @Published var optimization: BuildOptimizationLevel
+    @Published var sdkVersion: BuildSDKVersion
     @Published var cflags: String
     @Published var ldflags: String
     @Published var jobs: Int
@@ -191,6 +198,8 @@ final class NativeBuildService: ObservableObject {
     @Published var running = false
     @Published var logLines: [String] = []
     @Published var lastResult: NativeBuildResult?
+    @Published private(set) var currentPhase: String = "就绪"
+    @Published private(set) var progress: Double = 0
     @Published private(set) var currentPID: pid_t = 0
 
     private let defaults = UserDefaults.standard
@@ -202,6 +211,8 @@ final class NativeBuildService: ObservableObject {
         static let clean = "nativeBuild.clean"
         static let extra = "nativeBuild.extra"
         static let obfuscation = "nativeBuild.obfuscation"
+        static let optimization = "nativeBuild.optimization"
+        static let sdkVersion = "nativeBuild.sdkVersion"
         static let cflags = "nativeBuild.cflags"
         static let ldflags = "nativeBuild.ldflags"
         static let jobs = "nativeBuild.jobs"
@@ -221,6 +232,8 @@ final class NativeBuildService: ObservableObject {
         cleanBeforeBuild = defaults.bool(forKey: Keys.clean)
         extraFlags = defaults.string(forKey: Keys.extra) ?? ""
         obfuscation = BuildObfuscation.parse(defaults.string(forKey: Keys.obfuscation))
+        optimization = BuildOptimizationLevel.parse(defaults.string(forKey: Keys.optimization))
+        sdkVersion = BuildSDKVersion.parse(defaults.string(forKey: Keys.sdkVersion))
         cflags = defaults.string(forKey: Keys.cflags) ?? ""
         ldflags = defaults.string(forKey: Keys.ldflags) ?? ""
         let storedJobs = defaults.integer(forKey: Keys.jobs)
@@ -243,6 +256,8 @@ final class NativeBuildService: ObservableObject {
         defaults.set(cleanBeforeBuild, forKey: Keys.clean)
         defaults.set(extraFlags, forKey: Keys.extra)
         defaults.set(obfuscation.rawValue, forKey: Keys.obfuscation)
+        defaults.set(optimization.rawValue, forKey: Keys.optimization)
+        defaults.set(sdkVersion.rawValue, forKey: Keys.sdkVersion)
         defaults.set(cflags, forKey: Keys.cflags)
         defaults.set(ldflags, forKey: Keys.ldflags)
         defaults.set(jobs, forKey: Keys.jobs)
@@ -270,6 +285,8 @@ final class NativeBuildService: ObservableObject {
                           cleanBeforeBuild: cleanBeforeBuild,
                           extraFlags: extraFlags,
                           obfuscation: obfuscation,
+                          optimization: optimization,
+                          sdkVersion: sdkVersion,
                           cflags: cflags,
                           ldflags: ldflags,
                           jobs: jobs,
@@ -303,6 +320,14 @@ final class NativeBuildService: ObservableObject {
     func refreshRuntimeHealth() async {
         let health = await NativeRuntimeHealthMonitor.shared.refresh()
         runtimeHealth = health
+    }
+
+    func updateProgress(for line: String) {
+        let lower = line.lowercased()
+        if lower.contains("clean") || lower.contains("prepar") { currentPhase = "准备 / 清理"; progress = max(progress, 0.08) }
+        else if lower.contains("compile") || lower.contains("clang") { currentPhase = "编译源码"; progress = min(0.78, max(progress, 0.25)) }
+        else if lower.contains("link") || lower.contains("ld64") { currentPhase = "链接"; progress = min(0.88, max(progress, 0.78)) }
+        else if lower.contains("package") || lower.contains("dpkg") { currentPhase = "打包产物"; progress = min(0.96, max(progress, 0.9)) }
     }
 
     func appendLog(_ line: String) {
@@ -345,12 +370,17 @@ final class NativeBuildService: ObservableObject {
     /// 真正的构建入口（探针通过后才走到这里）。
     private func beginBuild(config: NativeBuildConfig) {
         running = true
+        currentPhase = "准备构建"
+        progress = 0.02
         logLines.removeAll()
         persist()
 
         Task { @MainActor in
             let result = await NativeBuildService.runBuild(config) { [weak self] line in
-                Task { @MainActor in self?.appendLog(line) }
+                Task { @MainActor in
+                    self?.appendLog(line)
+                    self?.updateProgress(for: line)
+                }
             } onSpawn: { [weak self] pid in
                 Task { @MainActor in self?.currentPID = pid }
             }
@@ -362,6 +392,8 @@ final class NativeBuildService: ObservableObject {
                 final = await self.packShell(config: config, build: result)
             }
             self.lastResult = final
+            self.currentPhase = final.ok ? "完成" : "失败"
+            self.progress = final.ok ? 1 : min(progress, 0.99)
             self.appendLog(final.ok ? "✓ 构建成功 · \(String(format: "%.1f", final.seconds)) 秒"
                                     : "✗ 构建失败（退出码 \(final.exitCode)）")
             for artifact in final.artifacts { self.appendLog("产物：\(artifact)") }
@@ -456,6 +488,20 @@ final class NativeBuildService: ObservableObject {
             return NativeBuildResult(ok: false, exitCode: -1, seconds: 0, artifacts: [],
                                      log: log,
                                      message: "原生运行时无法启动（\(health.failure.title)）")
+        }
+        if config.sdkVersion == .sdk260 {
+            let candidates: [String] = {
+                guard let root = toolchain.theosRoot?.path else { return [] }
+                return [
+                    "\(root)/sdks/iPhoneOS26.0.sdk",
+                    "\(root)/theos/sdks/iPhoneOS26.0.sdk"
+                ]
+            }()
+            guard candidates.contains(where: { FileManager.default.fileExists(atPath: $0) }) else {
+                let log = "SDK 26.0 未安装：请把 iPhoneOS26.0.sdk 放入 Theos/sdks 后重试；运行时逻辑未被修改。"
+                onLine?(log)
+                return NativeBuildResult(ok: false, exitCode: -1, seconds: 0, artifacts: [], log: log, message: log)
+            }
         }
         let env = toolchain.environment(projectPath: config.projectPath)
         let result = await NativeCommandRunner.run(command: config.command,
