@@ -41,6 +41,12 @@ enum NativeBuildTool {
                                             enumValues: ["project", "generate", "direct"]),
                 "profile": AgentToolParam(type: .string,
                                           description: "Name of a saved build profile (device UI: 编译工作台 → 编译配置). Its scheme/archs/obfuscation/protection/output become defaults; arguments you pass explicitly still win."),
+                "optimization": AgentToolParam(type: .string,
+                                               description: "LLVM optimization: debug (-O0), size (-Os), speed (-O2, default), aggressive (-O3). Compile-time only; runtime APIs are unchanged.",
+                                               enumValues: BuildOptimizationLevel.allCases.map(\.rawValue)),
+                "sdk_version": AgentToolParam(type: .string,
+                                               description: "Theos SDK version: 16.4 (default) or 26.0; 26.0 requires iPhoneOS26.0.sdk installed in the native runtime.",
+                                               enumValues: BuildSDKVersion.allCases.map(\.rawValue)),
                 "obfuscation": AgentToolParam(type: .string,
                                               description: "OLLVM obfuscation strength: off (default), light, balanced, strong, paranoid, extreme. Requires the OLLVM runtime to be installed. extreme adds indirect-branch/indirect-call passes and a much larger binary.",
                                               enumValues: BuildObfuscation.allCases.map(\.rawValue)),
@@ -70,7 +76,7 @@ enum NativeBuildTool {
             ],
             required: ["tool_title", "path"],
             propertyOrdering: ["tool_title", "path", "scheme", "archs", "clean", "extra",
-                               "obfuscation", "cflags", "ldflags", "jobs", "timeout",
+                               "optimization", "sdk_version", "obfuscation", "cflags", "ldflags", "jobs", "timeout",
                                "product", "incremental", "strip_symbols", "hide_symbols",
                                "encrypt_strings", "shell_ipa", "tool_note"]
         )
@@ -91,6 +97,8 @@ enum NativeBuildTool {
                 if args["scheme"] == nil { args["scheme"] = saved.scheme }
                 if args["archs"] == nil { args["archs"] = saved.archs }
                 if args["obfuscation"] == nil { args["obfuscation"] = saved.obfuscation.rawValue }
+                if args["optimization"] == nil { args["optimization"] = saved.optimization.rawValue }
+                if args["sdk_version"] == nil { args["sdk_version"] = saved.sdkVersion.rawValue }
                 if args["clean"] == nil { args["clean"] = saved.cleanBeforeBuild }
                 if args["incremental"] == nil { args["incremental"] = saved.incremental }
                 if args["jobs"] == nil { args["jobs"] = saved.jobs }
@@ -156,6 +164,8 @@ enum NativeBuildTool {
         let timeout = TimeInterval((args["timeout"] as? Int) ?? 1800)
 
         let obfuscation = BuildObfuscation.parse(args["obfuscation"] as? String)
+        let optimization = BuildOptimizationLevel.parse(args["optimization"] as? String)
+        let sdkVersion = BuildSDKVersion.parse(args["sdk_version"] as? String)
         let cflags = (args["cflags"] as? String) ?? ""
         let ldflags = (args["ldflags"] as? String) ?? ""
         let jobs = (args["jobs"] as? Int) ?? 4
@@ -201,6 +211,8 @@ enum NativeBuildTool {
                                        extraFlags: extra,
                                        timeout: timeout,
                                        obfuscation: obfuscation,
+                                       optimization: optimization,
+                                       sdkVersion: sdkVersion,
                                        cflags: cflags,
                                        ldflags: ldflags,
                                        jobs: jobs,

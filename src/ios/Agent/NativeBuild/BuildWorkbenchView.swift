@@ -16,6 +16,8 @@ struct BuildWorkbenchView: View {
     @State private var showIPAPicker = false
     @State private var importMessage: String?
     @State private var importing = false
+    @State private var showSDKPicker = false
+    @State private var sdkMessage: String?
 
     var body: some View {
         Form {
@@ -46,6 +48,18 @@ struct BuildWorkbenchView: View {
         .sheet(isPresented: $showArchivePicker) {
             ArchivePickerView { url in
                 importArchive(url)
+            }
+        }
+        .sheet(isPresented: $showSDKPicker) {
+            FolderPickerView { url in
+                Task.detached(priority: .userInitiated) {
+                    do {
+                        let installed = try BuildSDKManager.installImportedSDK(from: url)
+                        await MainActor.run { sdkMessage = "✓ 已导入 \(installed.lastPathComponent)" }
+                    } catch {
+                        await MainActor.run { sdkMessage = "✗ SDK 导入失败：\(error.localizedDescription)" }
+                    }
+                }
             }
         }
         .sheet(isPresented: $showIPAPicker) {
@@ -304,6 +318,28 @@ struct BuildWorkbenchView: View {
 
     private var configSection: some View {
         Section {
+            Picker("优化级别", selection: Binding(get: { service.optimization },
+                                                  set: { service.optimization = $0; service.persist() })) {
+                ForEach(BuildOptimizationLevel.allCases) { level in
+                    Text(level.displayName).tag(level)
+                }
+            }
+            Picker("SDK", selection: Binding(get: { service.sdkVersion },
+                                              set: { service.sdkVersion = $0; service.persist() })) {
+                ForEach(BuildSDKVersion.allCases) { version in
+                    Text(version.displayName).tag(version)
+                }
+            }
+            Text(service.sdkVersion == .sdk260
+                 ? "SDK 26.0 需要安装在 Theos/sdks/iPhoneOS26.0.sdk；仅改变编译 SDK，不改变运行时逻辑。"
+                 : "使用 iPhoneOS 16.4 SDK；可在安装 SDK 26.0 后切换。")
+                .font(.caption2).foregroundStyle(.secondary)
+            if service.sdkVersion == .sdk260 && !BuildSDKManager.isInstalled(.sdk260) {
+                Button { showSDKPicker = true } label: {
+                    Label("导入 iPhoneOS26.0.sdk 文件夹", systemImage: "square.and.arrow.down")
+                }
+            }
+            if let sdkMessage { Text(sdkMessage).font(.caption2).foregroundStyle(.secondary).textSelection(.enabled) }
             Picker("打包方案", selection: Binding(get: { service.scheme },
                                                   set: { service.scheme = $0; service.persist() })) {
                 Text(verbatim: "rootless").tag("rootless")
@@ -394,6 +430,16 @@ struct BuildWorkbenchView: View {
 
     private var actionSection: some View {
         Section {
+            if service.running {
+                VStack(alignment: .leading, spacing: 6) {
+                    ProgressView(value: service.progress)
+                    HStack {
+                        Text(service.currentPhase).font(.caption.weight(.semibold))
+                        Spacer()
+                        Text("\(Int(service.progress * 100))%").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    }
+                }
+            }
             if service.running {
                 Button(role: .destructive) {
                     service.cancel()

@@ -432,6 +432,35 @@ extension AIChatViewModel {
 
         do {
         switch tu.name {
+        case WorkspaceFileTool.readName:
+            let path = (toolArgs["path"] as? String) ?? ""
+            let maxLength = (toolArgs["max_length"] as? Int) ?? 30000
+            let outcome = WorkspaceFileTool.read(path: path, maxLength: maxLength)
+            toolOutput = outcome.0
+            toolSuccess = outcome.1
+        case WorkspaceFileTool.editName:
+            let path = (toolArgs["path"] as? String) ?? ""
+            let oldString = (toolArgs["old_string"] as? String) ?? ""
+            let newString = (toolArgs["new_string"] as? String) ?? ""
+            let replaceAll = (toolArgs["replace_all"] as? Bool) ?? false
+            let outcome = await WorkspaceFileTool.edit(path: path, oldString: oldString, newString: newString, replaceAll: replaceAll)
+            toolOutput = outcome.0
+            toolSuccess = outcome.1
+        case WorkspaceAnalysisTool.name:
+            let path = (toolArgs["path"] as? String) ?? ""
+            let includeFiles = (toolArgs["include_files"] as? Bool) ?? true
+            let maxFiles = (toolArgs["max_files"] as? Int) ?? 120
+            if let url = WorkspaceFileTool.resolve(path), FileManager.default.fileExists(atPath: url.path) {
+                toolOutput = WorkspaceAnalysisTool.analyze(root: url, includeFiles: includeFiles, maxFiles: maxFiles)
+                toolSuccess = true
+            } else {
+                toolOutput = "Error: workspace not found at \(path)"
+                toolSuccess = false
+            }
+        case WorkspaceGitTool.name:
+            let outcome = await WorkspaceGitTool.perform(args: toolArgs)
+            toolOutput = outcome.0
+            toolSuccess = outcome.1
         case NativeBuildTool.name:
             let outcome = await NativeBuildTool.perform(args: toolArgs)
             toolOutput = outcome.text
