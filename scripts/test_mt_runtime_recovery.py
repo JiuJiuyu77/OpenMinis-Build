@@ -34,8 +34,11 @@ checks = {
     "diagnostics trace": "codexMTLog" in diag and "Codex-MT 运行诊断日志" in report,
     "tar root marker accepted": "normalizedEntryPath(full)" in extractor and "guard isDirectory, size == 0" in extractor,
     "tar traversal rejected": "part == \"..\"" in extractor and "hasPrefix(\"/\")" in extractor,
-    "frameworks are adhoc signed": "declaredFrameworks" in signing and "code signature invalid" in signing,
+    "frameworks are adhoc signed": "declaredFrameworks" in signing and "isDylibOrFramework" in signing,
+    "overlapping sign paths are deduplicated": "explicitAdhocPaths" in signing and "signingTargets" in signing,
+    "fat framework bootstrap": "isFatMachO" in signing and "--adhoc-only" in signing,
     "framework probe paths": "root.appendingPathComponent(\"Frameworks\"" in verifier,
+    "small gzip stable path": "extractSmallGzip" in extractor and "inflateWholeGzip" in extractor,
     "archive digest update detection": "sameArchive" in manager and "archiveSHA256.caseInsensitiveCompare" in manager,
     "update count UI": "updateCount" in text("src/ios/Views/Settings/DeveloperRuntimeSettingsView.swift"),
 }

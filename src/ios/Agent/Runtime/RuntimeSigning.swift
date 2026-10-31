@@ -104,19 +104,23 @@ enum RuntimeSigner {
         let discoveredAdhocTargets = discovered.filter { isDylibOrFramework($0) }
         let discoveredEntitlementsTargets = discovered.filter { !isDylibOrFramework($0) }
 
-        // A bundle manifest historically put every Python Mach-O in
-        // `sign_paths`. Framework/dylib members must nevertheless be signed
-        // without app entitlements: attaching private process entitlements to
-        // a nested dynamic library produces dyld "code signature invalid" on
-        // iOS even when the main TrollStore app is correctly entitled.
-        // Central manifests can still force this explicitly through
-        // sign_paths_without_entitlements.
+        // A few published bundles list the same Mach-O in both arrays. The
+        // no-entitlements list is authoritative; otherwise ldid/minis-sign
+        // would rewrite the same file twice and codex-sign can report
+        // "no compatible Mach-O slice" on the second pass.
+        let explicitAdhocPaths = Set(declaredAdhocTargets.map { $0.standardizedFileURL.path })
         let executableEntitlementsTargets = declaredEntitlementsTargets
+            .filter { !explicitAdhocPaths.contains($0.standardizedFileURL.path) }
             .filter { !isDylibOrFramework($0) }
         let declaredFrameworks = declaredEntitlementsTargets
+            .filter { !explicitAdhocPaths.contains($0.standardizedFileURL.path) }
             .filter { isDylibOrFramework($0) }
         let entitlementsTargets = executableEntitlementsTargets + discoveredEntitlementsTargets
         let adhocTargets = declaredAdhocTargets + declaredFrameworks + discoveredAdhocTargets
+        var seenTargetPaths = Set<String>()
+        let signingTargets = (adhocTargets + entitlementsTargets).filter {
+            seenTargetPaths.insert($0.standardizedFileURL.path).inserted
+        }
 
         guard !entitlementsTargets.isEmpty || !adhocTargets.isEmpty else {
             return RuntimeSignReport(status: .skipped, mode: nil, signedCount: 0, failedPaths: [],
@@ -143,18 +147,34 @@ enum RuntimeSigner {
         var lastOutput = ""
         let plistURL = writeTemporaryPlist(entitlements)
 
-        // Sign nested frameworks and dylibs first, then launchable tools. This
-        // mirrors iOS bundle signing order and prevents a parent executable
-        // from retaining a stale dependency CodeDirectory during first boot.
-        for target in adhocTargets + entitlementsTargets {
-            let isAdhocOnly = adhocTargets.contains(target)
+        let adhocTargetPaths = Set(adhocTargets.map { $0.standardizedFileURL.path })
+        for target in signingTargets {
+            let isAdhocOnly = adhocTargetPaths.contains(target.standardizedFileURL.path)
             guard isMachO(target) else { continue }
             let name = target.lastPathComponent
 
-            // 1. 第一段签名：优先 ldid（能写 entitlements）；Theos 运行时的 ldid
-            //    自己也可能还没签名（引导期），那就让 minis-sign 先做一次 adhoc。
+            // FAT Mach-O needs special bootstrapping. ldid appends the new
+            // code signature to the selected slice but some iOS ldid builds do
+            // not enlarge the FAT slice size. codex-sign must thin/sign it
+            // first, otherwise dyld later reports an invalid code signature.
+            let isFat = isFatMachO(target)
             var adhocDone = false
-            if let ldid {
+            if isFat, let minisSign {
+                let bootstrap = RuntimeProbeRunner.run(executable: minisSign.path,
+                                                       arguments: ["--adhoc-only", target.path],
+                                                       environment: ProcessInfo.processInfo.environment,
+                                                       workingDirectory: root.path,
+                                                       timeout: timeout)
+                lastOutput = bootstrap.output
+                adhocDone = bootstrap.spawnError == nil && bootstrap.status == 0
+                if adhocDone && isAdhocOnly {
+                    signed += 1
+                    continue
+                }
+            }
+
+            // 1. 第一段签名：优先 ldid（能写 entitlements）。
+            if !isAdhocOnly || !adhocDone, let ldid {
                 let ldidArguments = isAdhocOnly || entitlements.isEmpty
                     ? ["-S", target.path]
                     : ["-S" + (plistURL?.path ?? ""), target.path]
@@ -182,7 +202,12 @@ enum RuntimeSigner {
 
             // 2. minis-sign：补 App Store 形态的 CodeDirectory。
             guard let minisSign else {
-                signed += 1 // adhoc 已成功，整体降级为 adhocOnly
+                signed += 1
+                continue
+            }
+            // FAT adhoc targets were completely handled by the bootstrap above.
+            if isFat && isAdhocOnly {
+                signed += 1
                 continue
             }
             var codexArguments: [String] = []
@@ -412,6 +437,14 @@ enum RuntimeSigner {
         defer { try? handle.close() }
         guard let magic = try? handle.read(upToCount: 4), magic.count == 4 else { return false }
         return machoMagics.contains([UInt8](magic))
+    }
+
+    private static func isFatMachO(_ url: URL) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? handle.close() }
+        guard let bytes = try? handle.read(upToCount: 4), bytes.count == 4 else { return false }
+        return bytes.elementsEqual([0xca, 0xfe, 0xba, 0xbe])
+            || bytes.elementsEqual([0xca, 0xfe, 0xba, 0xbf])
     }
 
     private static func discoverMachOFiles(in root: URL) -> [URL] {

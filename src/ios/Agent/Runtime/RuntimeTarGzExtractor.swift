@@ -64,6 +64,18 @@ enum RuntimeTarGzExtractor {
         let fm = FileManager.default
         try fm.createDirectory(at: destination, withIntermediateDirectories: true)
 
+        // The iOS zlib build has occasionally returned Z_DATA_ERROR when a
+        // gzip member boundary lands exactly between two 256 KiB reads. The
+        // portable runtimes (Python/ReverseTools/CoreTools/Node) are small
+        // enough to decode in one zlib call; use that deterministic path for
+        // them and keep the streaming path for the 1.2 GB Theos tree.
+        let archiveSize = (try? fm.attributesOfItem(atPath: archive.path))?[.size] as? NSNumber
+        if let bytes = archiveSize?.int64Value, bytes <= 64 * 1024 * 1024 {
+            try extractSmallGzip(archive, to: destination,
+                                 isCancelled: isCancelled, progress: progress)
+            return
+        }
+
         guard let gz = try? FileHandle(forReadingFrom: archive) else {
             throw ExtractError.notGzip
         }
@@ -104,6 +116,70 @@ enum RuntimeTarGzExtractor {
         guard inflater.didSeeMemberEnd else { throw ExtractError.truncated }
         try parser.finish()
         logger.info("Extracted \(parser.entriesWritten) entries, \(parser.bytesWritten) bytes to \(destination.lastPathComponent)")
+    }
+
+    private static func extractSmallGzip(_ archive: URL,
+                                         to destination: URL,
+                                         isCancelled: () -> Bool,
+                                         progress: ((Progress) -> Void)?) throws {
+        if isCancelled() { throw CancellationError() }
+        let data = try Data(contentsOf: archive, options: [.mappedIfSafe])
+        let plain = try inflateWholeGzip(data)
+        if isCancelled() { throw CancellationError() }
+        var parser = TarParser(destination: destination, progress: progress)
+        try autoreleasepool { try parser.consume(plain) }
+        try parser.finish()
+        logger.info("Extracted small gzip with one-shot zlib: \(parser.entriesWritten) entries, \(parser.bytesWritten) bytes")
+    }
+
+    /// Decode one complete gzip member with zlib in a single input window.
+    /// This avoids the iOS zlib boundary bug seen with ReverseTools while
+    /// retaining the streaming implementation for the large Theos archive.
+    private static func inflateWholeGzip(_ input: Data) throws -> Data {
+        guard input.count >= 18, input[0] == 0x1f, input[1] == 0x8b else {
+            throw ExtractError.notGzip
+        }
+        let tail = input.suffix(4)
+        let expected = tail.enumerated().reduce(UInt32(0)) { value, item in
+            value | (UInt32(item.element) << UInt32(item.offset * 8))
+        }
+        var capacity = max(Int(expected), 1)
+        var output = Data(count: capacity)
+        var stream = z_stream()
+        let initStatus = inflateInit2_(&stream, 31, zlibVersion(),
+                                       Int32(MemoryLayout<z_stream>.size))
+        guard initStatus == Z_OK else {
+            throw ExtractError.corrupt("inflateInit2 returned \(initStatus)")
+        }
+        defer { inflateEnd(&stream) }
+
+        let status: Int32 = input.withUnsafeBytes { raw in
+            guard let source = raw.bindMemory(to: UInt8.self).baseAddress else { return Z_DATA_ERROR }
+            stream.next_in = UnsafeMutablePointer<Bytef>(mutating: source)
+            stream.avail_in = uInt(raw.count)
+            while true {
+                let result: Int32 = output.withUnsafeMutableBytes { bytes in
+                    guard let target = bytes.bindMemory(to: UInt8.self).baseAddress else { return Z_DATA_ERROR }
+                    stream.next_out = target
+                    stream.avail_out = uInt(bytes.count)
+                    return zlib.inflate(&stream, Z_NO_FLUSH)
+                }
+                if result == Z_STREAM_END { return result }
+                if result != Z_OK { return result }
+                if stream.avail_out != 0 { return Z_BUF_ERROR }
+                if capacity > 1024 * 1024 * 1024 { return Z_MEM_ERROR }
+                let next = min(capacity * 2, 1024 * 1024 * 1024)
+                output.append(Data(repeating: 0, count: next - capacity))
+                capacity = next
+            }
+        }
+        guard status == Z_STREAM_END else {
+            throw ExtractError.corrupt("inflate returned \(status)")
+        }
+        let written = Int(stream.total_out)
+        guard written <= output.count else { throw ExtractError.corrupt("inflate output overflow") }
+        output.removeSubrange(written...)
+        return output
     }
 
     /// Extract an UNCOMPRESSED tar file. Used after a `.deb`'s `data.tar.zst`
@@ -228,15 +304,20 @@ enum RuntimeTarGzExtractor {
                         if produced == 0 { break }
                     }
 
-                    let consumed = (raw.count - offset) - Int(stream.avail_in)
-                    offset += consumed
-                    if consumed == 0 {
+                    // `avail_in` belongs to the current input window. Keep
+                    // the offset monotonic even when zlib reports the member
+                    // boundary with buffered bytes still pending.
+                    let consumed = max(0, (raw.count - offset) - Int(stream.avail_in))
+                    if consumed > 0 {
+                        offset += consumed
+                    } else if reachedStreamEnd {
+                        // The current member ended exactly at this boundary;
+                        // wait for the next outer chunk before restarting.
+                        break
+                    } else {
                         // No progress and no end-of-member: a corrupt stream
                         // would otherwise spin here forever.
-                        if !reachedStreamEnd {
-                            throw ExtractError.corrupt("inflate made no progress")
-                        }
-                        break
+                        throw ExtractError.corrupt("inflate made no progress")
                     }
                 }
             }

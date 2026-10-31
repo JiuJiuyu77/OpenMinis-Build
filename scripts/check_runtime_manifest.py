@@ -135,9 +135,20 @@ def check_runtime(runtime_id: str, runtime: dict, handlers_seen: set) -> None:
         if not isinstance(probe.get("arguments", []), list):
             error(f"{where}.install.probe.arguments: expected a list")
 
-    for entry in install.get("sign_paths") or []:
+    sign_paths = set(install.get("sign_paths") or [])
+    adhoc_paths = set(install.get("sign_paths_without_entitlements") or [])
+    for entry in sign_paths:
         if entry not in required:
             warn(f"{where}.install.sign_paths {entry!r} is not in required_paths")
+    for entry in adhoc_paths:
+        if entry not in required:
+            warn(f"{where}.install.sign_paths_without_entitlements {entry!r} is not in required_paths")
+    overlap = sorted(sign_paths & adhoc_paths)
+    if overlap:
+        # RuntimeSigner deliberately gives the no-entitlements list precedence
+        # so old Theos/Node bundles remain installable, but publish the issue
+        # instead of letting a future signer silently sign a file twice.
+        warn(f"{where}.install sign_paths overlap adhoc paths; adhoc wins: {', '.join(overlap[:6])}")
 
     for key, value in (install.get("environment") or {}).items():
         if "${RUNTIME_ROOT}" not in str(value):
@@ -147,7 +158,7 @@ def check_runtime(runtime_id: str, runtime: dict, handlers_seen: set) -> None:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--manifest",
-                        default="https://raw.githubusercontent.com/JiuJiuyu77/CodexApp-Runtime/main/Runtime/runtime-manifest.json")
+                        default="https://raw.githubusercontent.com/JiuJiuyu77/MinisApp-Runtime/main/Runtime/runtime-manifest.json")
     parser.add_argument("--required-capability", action="append", default=None,
                         help="capability the app depends on (repeatable)")
     parser.add_argument("--json", action="store_true")
