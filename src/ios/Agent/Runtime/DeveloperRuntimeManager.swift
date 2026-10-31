@@ -307,7 +307,14 @@ final class DeveloperRuntimeManager: ObservableObject {
                 atPath: DeveloperRuntimePaths.installDirectory(id: descriptor.id).path) else {
             return .notInstalled
         }
-        if record.version == descriptor.version, record.revision == descriptor.revision {
+        // Version strings are user-facing; revision and archive digest are the
+        // immutable update signals. Checking all three catches a republished
+        // runtime whose version label did not change but whose payload did.
+        let sameVersion = record.version == descriptor.version
+        let sameRevision = record.revision == descriptor.revision
+        let sameArchive = record.archiveSHA256.caseInsensitiveCompare(
+            descriptor.archiveSHA256) == .orderedSame
+        if sameVersion && sameRevision && sameArchive {
             return .installed(record)
         }
         return .outdated(record)

@@ -103,8 +103,20 @@ enum RuntimeSigner {
             .filter { !declared.contains($0.standardizedFileURL.path) }
         let discoveredAdhocTargets = discovered.filter { isDylibOrFramework($0) }
         let discoveredEntitlementsTargets = discovered.filter { !isDylibOrFramework($0) }
-        let entitlementsTargets = declaredEntitlementsTargets + discoveredEntitlementsTargets
-        let adhocTargets = declaredAdhocTargets + discoveredAdhocTargets
+
+        // A bundle manifest historically put every Python Mach-O in
+        // `sign_paths`. Framework/dylib members must nevertheless be signed
+        // without app entitlements: attaching private process entitlements to
+        // a nested dynamic library produces dyld "code signature invalid" on
+        // iOS even when the main TrollStore app is correctly entitled.
+        // Central manifests can still force this explicitly through
+        // sign_paths_without_entitlements.
+        let executableEntitlementsTargets = declaredEntitlementsTargets
+            .filter { !isDylibOrFramework($0) }
+        let declaredFrameworks = declaredEntitlementsTargets
+            .filter { isDylibOrFramework($0) }
+        let entitlementsTargets = executableEntitlementsTargets + discoveredEntitlementsTargets
+        let adhocTargets = declaredAdhocTargets + declaredFrameworks + discoveredAdhocTargets
 
         guard !entitlementsTargets.isEmpty || !adhocTargets.isEmpty else {
             return RuntimeSignReport(status: .skipped, mode: nil, signedCount: 0, failedPaths: [],
@@ -131,7 +143,10 @@ enum RuntimeSigner {
         var lastOutput = ""
         let plistURL = writeTemporaryPlist(entitlements)
 
-        for target in entitlementsTargets + adhocTargets {
+        // Sign nested frameworks and dylibs first, then launchable tools. This
+        // mirrors iOS bundle signing order and prevents a parent executable
+        // from retaining a stale dependency CodeDirectory during first boot.
+        for target in adhocTargets + entitlementsTargets {
             let isAdhocOnly = adhocTargets.contains(target)
             guard isMachO(target) else { continue }
             let name = target.lastPathComponent

@@ -58,6 +58,28 @@ struct DeveloperRuntimeSettingsView: View {
                 }
             }
 
+            if manager.manifest != nil {
+                Section {
+                    if updateCount > 0 {
+                        Label(String(format: AppLocalized("%d runtime updates available"), updateCount),
+                              systemImage: "arrow.down.circle.fill")
+                            .foregroundStyle(.orange)
+                    } else {
+                        Label(AppLocalized("All runtimes are up to date"),
+                              systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    }
+                    Button {
+                        Task { await manager.refreshManifest() }
+                    } label: {
+                        Label(AppLocalized("Check for updates"), systemImage: "arrow.clockwise")
+                    }
+                    .disabled(manager.isLoadingManifest)
+                } header: {
+                    Text(AppLocalized("Updates"))
+                }
+            }
+
             ForEach(groupedRuntimes, id: \.group) { section in
                 Section {
                     ForEach(section.runtimes) { descriptor in
@@ -271,6 +293,16 @@ struct DeveloperRuntimeSettingsView: View {
 
     private var installedBytes: Int64 {
         manager.records.values.reduce(0) { $0 + $1.sizeBytes }
+    }
+
+    /// The state compares version, revision and archive SHA-256, so this also
+    /// catches a republished payload with an unchanged version label.
+    private var updateCount: Int {
+        manager.runtimes.reduce(into: 0) { count, descriptor in
+            if case .outdated = manager.state(for: descriptor) {
+                count += 1
+            }
+        }
     }
 
     @ViewBuilder

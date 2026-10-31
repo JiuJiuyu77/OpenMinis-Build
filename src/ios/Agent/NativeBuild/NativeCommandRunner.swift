@@ -114,9 +114,22 @@ enum NativeCommandRunner {
                 if !root.isEmpty { dirs.append("\(root)/lib") }
                 if !root.isEmpty { dirs.append("\(root)/usr/lib") }
             }
-            // 添加 App Frameworks 路径（签名过的动态库）
+            // 添加 App Frameworks 路径（签名过的动态库）以及运行时自带
+            // 的 Python.framework/extension frameworks。Python 的可执行文件
+            // 使用 @rpath/Python.framework/Python，只有把运行时根目录放进
+            // DYLD_FRAMEWORK_PATH 后，安装后的命令行调用才不会再次失败。
+            var frameworkPaths: [String] = []
+            if let runtimeRoot = environment["MINIS_RUNTIME_ROOT"]
+                ?? environment["CA_RUNTIME_ROOT"] {
+                frameworkPaths.append(runtimeRoot)
+                frameworkPaths.append((runtimeRoot as NSString)
+                    .appendingPathComponent("Frameworks"))
+                dirs.append(runtimeRoot)
+                dirs.append((runtimeRoot as NSString).appendingPathComponent("Frameworks"))
+            }
             if let fwPath = Bundle.main.privateFrameworksPath {
                 dirs.append(fwPath)
+                frameworkPaths.append(fwPath)
             }
             let joined = dirs.joined(separator: ":")
             if !joined.isEmpty {
@@ -127,9 +140,17 @@ enum NativeCommandRunner {
                 } else {
                     environment["DYLD_LIBRARY_PATH"] = joined
                 }
-                // 设置 Framework 搜索路径
-                if let fwPath = Bundle.main.privateFrameworksPath {
-                    environment["DYLD_FRAMEWORK_PATH"] = fwPath
+                // 设置 Framework 搜索路径，保留已有值并把运行时路径放前面。
+                let validFrameworkPaths = frameworkPaths.filter {
+                    FileManager.default.fileExists(atPath: $0)
+                }
+                if !validFrameworkPaths.isEmpty {
+                    let frameworkPrefix = validFrameworkPaths.joined(separator: ":")
+                    if let existing = environment["DYLD_FRAMEWORK_PATH"], !existing.isEmpty {
+                        environment["DYLD_FRAMEWORK_PATH"] = "\(frameworkPrefix):\(existing)"
+                    } else {
+                        environment["DYLD_FRAMEWORK_PATH"] = frameworkPrefix
+                    }
                 }
             }
         }

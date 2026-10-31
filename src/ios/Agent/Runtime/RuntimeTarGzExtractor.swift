@@ -389,16 +389,26 @@ enum RuntimeTarGzExtractor {
             if let longName { full = longName }
             longName = nil
 
-            if full.hasPrefix("./") { full.removeFirst(2) }
-            while full.hasPrefix("/") { full.removeFirst() }
-            while full.count > 1, full.hasSuffix("/") { full.removeLast() }
-
-            let resolved = try safeDestination(for: full)
+            // GNU/POSIX tar commonly starts with a harmless `./` directory
+            // marker. The old code stripped `./` before validating the path,
+            // turning that marker into an empty path and rejecting every
+            // otherwise valid Theos archive as `unsafe entry path:`.
+            let normalized = try normalizedEntryPath(full)
             let isDirectory = type == UInt8(ascii: "5") || full.hasSuffix("/")
             let isSymlink = type == UInt8(ascii: "2")
             let isHardlink = type == UInt8(ascii: "1")
             let isRegular = type == 0 || type == UInt8(ascii: "0") || type == UInt8(ascii: "7")
 
+            // A root directory marker has no filesystem object to create. It
+            // is safe to consume its padding and continue with the first real
+            // member; an empty regular/link entry remains invalid.
+            if normalized.isEmpty {
+                guard isDirectory, size == 0 else { throw ExtractError.unsafePath(full) }
+                padRemaining = size % 512 == 0 ? 0 : 512 - (size % 512)
+                return
+            }
+
+            let resolved = try safeDestination(for: normalized)
             let fm = FileManager.default
 
             if isDirectory {
@@ -492,17 +502,35 @@ enum RuntimeTarGzExtractor {
             current = nil
         }
 
+        /// Normalize a tar member without weakening the containment check.
+        /// `./`, repeated separators and a trailing slash are normal archive
+        /// syntax; absolute paths, NULs and `..` are never accepted.
+        private func normalizedEntryPath(_ path: String) throws -> String {
+            // Keep spaces in legitimate filenames. GNU long-name records carry
+            // a trailing LF, which is the only whitespace we intentionally trim.
+            let cleaned = path.trimmingCharacters(in: CharacterSet.newlines)
+            guard !cleaned.contains("\0"), !cleaned.hasPrefix("/") else {
+                throw ExtractError.unsafePath(path)
+            }
+            var components: [String] = []
+            for raw in cleaned.split(separator: "/", omittingEmptySubsequences: true) {
+                let part = String(raw)
+                if part == "." { continue }
+                if part == ".." || part.contains("\0") {
+                    throw ExtractError.unsafePath(path)
+                }
+                components.append(part)
+            }
+            return components.joined(separator: "/")
+        }
+
         /// Reject absolute paths and `..` escapes before anything is written.
         private func safeDestination(for path: String) throws -> URL {
-            let trimmed = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            let trimmed = try normalizedEntryPath(path)
             guard !trimmed.isEmpty else { throw ExtractError.unsafePath(path) }
             var candidate = destination
             for component in trimmed.split(separator: "/", omittingEmptySubsequences: true) {
-                let part = String(component)
-                if part == "." { continue }
-                if part == ".." { throw ExtractError.unsafePath(path) }
-                if part.contains("\0") { throw ExtractError.unsafePath(path) }
-                candidate.appendPathComponent(part)
+                candidate.appendPathComponent(String(component))
             }
             let root = destination.standardizedFileURL.path
             let resolved = candidate.standardizedFileURL.path

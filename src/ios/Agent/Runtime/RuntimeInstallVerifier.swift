@@ -123,8 +123,20 @@ enum RuntimeInstallVerifier {
                 + (existing.map { ":\($0)" } ?? "")
             environment["DYLD_FALLBACK_LIBRARY_PATH"] = runtimeLibs.joined(separator: ":")
         }
-        if let frameworks = Bundle.main.privateFrameworksPath {
-            environment["DYLD_FRAMEWORK_PATH"] = frameworks
+        // Python and other portable runtimes carry their own frameworks next
+        // to the probe executable. `@rpath/Python.framework/Python` must search
+        // the runtime root, not only Minis.app/Frameworks (which is absent in
+        // a normal runtime install). Keep the app path as a fallback.
+        var frameworkPaths: [String] = [root.path,
+                                        root.appendingPathComponent("Frameworks", isDirectory: true).path]
+        if let appFrameworks = Bundle.main.privateFrameworksPath {
+            frameworkPaths.append(appFrameworks)
+        }
+        frameworkPaths = frameworkPaths.filter { FileManager.default.fileExists(atPath: $0) }
+        if !frameworkPaths.isEmpty {
+            let prefix = frameworkPaths.joined(separator: ":")
+            environment["DYLD_FRAMEWORK_PATH"] = prefix
+            environment["DYLD_LIBRARY_PATH"] = prefix + ":" + (environment["DYLD_LIBRARY_PATH"] ?? "")
         }
 
         let result = RuntimeProbeRunner.run(executable: executable.path,
