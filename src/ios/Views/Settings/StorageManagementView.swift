@@ -653,7 +653,7 @@ struct StorageManagementView: View {
             } header: {
                 Text(AppLocalized("Danger Zone"))
             } footer: {
-                Text(AppLocalized("Deletes local chats, session files, shell container, runtimes, provider credentials, caches and settings. It does not delete iCloud data. The app must be relaunched after completion."))
+                Text(AppLocalized("Deletes local chats, session files, shell container, runtimes, provider credentials, caches, settings and embedded web sign-in data. It does not delete iCloud data. The app must be relaunched after completion."))
             }
 
             Section("Sessions") {

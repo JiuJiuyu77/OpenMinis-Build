@@ -87,6 +87,7 @@ enum FreshInstallReset {
                               failedPaths: failures)
     }
 
+    @MainActor
     private static func clearWebData() async {
         await withCheckedContinuation { continuation in
             WKWebsiteDataStore.default().removeData(
