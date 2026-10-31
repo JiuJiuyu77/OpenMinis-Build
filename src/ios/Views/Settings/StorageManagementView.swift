@@ -544,6 +544,9 @@ class StorageManagementViewModel: ObservableObject {
 struct StorageManagementView: View {
     @StateObject private var vm = StorageManagementViewModel()
     @State private var showClearLogsConfirmation = false
+    @State private var showFreshInstallResetConfirmation = false
+    @State private var isResettingToFreshInstall = false
+    @State private var freshInstallResetMessage: String?
     // [T-storage-session-cache] Multi-select on the Sessions list, Mail-style:
     // "Select" in the navigation bar, tap rows to tick them, act from the bar
     // at the bottom.
@@ -632,6 +635,27 @@ struct StorageManagementView: View {
 
             orphanCleanupSection
 
+            Section {
+                Button(role: .destructive) {
+                    showFreshInstallResetConfirmation = true
+                } label: {
+                    HStack {
+                        if isResettingToFreshInstall {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text(AppLocalized("Restoring…"))
+                        } else {
+                            Label(AppLocalized("Restore as New Installation"), systemImage: "arrow.counterclockwise.circle.fill")
+                        }
+                    }
+                }
+                .disabled(isResettingToFreshInstall || vm.isLoading || !vm.processingIds.isEmpty)
+            } header: {
+                Text(AppLocalized("Danger Zone"))
+            } footer: {
+                Text(AppLocalized("Deletes local chats, session files, shell container, runtimes, provider credentials, caches and settings. It does not delete iCloud data. The app must be relaunched after completion."))
+            }
+
             Section("Sessions") {
                 if vm.isLoading {
                     HStack {
@@ -704,6 +728,39 @@ struct StorageManagementView: View {
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("Crash reports are deleted too, so send any you need first. Chats, files and settings are not affected.")
+        }
+        .alert("Restore as New Installation?", isPresented: $showFreshInstallResetConfirmation) {
+            Button("Restore", role: .destructive) {
+                runFreshInstallReset()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This permanently deletes all local Minis data, including chats, shell files, runtimes, provider credentials and settings. iCloud data is not deleted. The app must be relaunched after completion.")
+        }
+        .alert("Restore Complete", isPresented: Binding(
+            get: { freshInstallResetMessage != nil },
+            set: { if !$0 { freshInstallResetMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(freshInstallResetMessage ?? "")
+        }
+    }
+
+    private func runFreshInstallReset() {
+        isResettingToFreshInstall = true
+        Task { @MainActor in
+            defer { isResettingToFreshInstall = false }
+            do {
+                let result = try await FreshInstallReset.perform()
+                if result.failedPaths.isEmpty {
+                    freshInstallResetMessage = AppLocalized("Removed \(result.removedPaths) local storage areas and \(result.keychainItems) credentials. Close and relaunch Minis to finish restoring the new-install state.")
+                } else {
+                    freshInstallResetMessage = AppLocalized("Reset completed with \(result.failedPaths.count) leftovers. Removed \(result.removedPaths) local storage areas and \(result.keychainItems) credentials. Relaunch Minis, then retry if needed.")
+                }
+            } catch {
+                freshInstallResetMessage = AppLocalized("Restore failed: \(error.localizedDescription)")
+            }
         }
     }
 

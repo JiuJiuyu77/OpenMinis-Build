@@ -213,6 +213,24 @@ class RootfsManager {
         logger.info("[Rootfs] installation complete (\(currentArch)) at \(rootfsPath.path)")
     }
 
+    /// Move the live rootfs out of the way without recursively deleting it.
+    /// The fresh-install reset uses this fast path before deleting large trees
+    /// on a utility queue, so the main actor never blocks on a multi-GB remove.
+    /// - Returns: the moved-aside tree, which can be deleted off the main actor.
+    @discardableResult
+    func prepareForFreshInstallReset() throws -> URL? {
+        guard FileManager.default.fileExists(atPath: rootfsPath.path) else { return nil }
+        if ISHKernel.shared.isBooted {
+            didResetWhileBooted = true
+            logger.warning("[Rootfs] fresh-install reset while kernel booted; terminal disabled until relaunch")
+        }
+        let parent = rootfsPath.deletingLastPathComponent()
+        let aside = parent.appendingPathComponent(".alpine-rootfs-reset-\(UUID().uuidString)")
+        try FileManager.default.moveItem(at: rootfsPath, to: aside)
+        logger.warning("[Rootfs] moved live rootfs aside for fresh-install reset: \(aside.lastPathComponent)")
+        return aside
+    }
+
     /// Reset (delete) the rootfs, forcing a fresh install on next launch
     /// - Parameter keepUserData: If true, backs up /root directory before deletion
     /// - Returns: URL of backup directory if keepUserData was true, nil otherwise
