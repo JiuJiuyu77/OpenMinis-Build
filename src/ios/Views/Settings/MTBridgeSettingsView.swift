@@ -13,7 +13,7 @@ struct MTBridgeSettingsView: View {
         Form {
             Section {
                 Toggle(AppLocalized("Enable MT bridge"), isOn: $enabled)
-                    .onChange(of: enabled) { _, value in
+                    .onChange(of: enabled) { value in
                         MTBridgeClient.setEnabled(value)
                     }
                 TextField("http://127.0.0.1:27018/mcp", text: $endpoint)
