@@ -215,6 +215,19 @@ struct SettingsSheet: View {
                         }
                     }
                     NavigationLink {
+                        MTBridgeSettingsView()
+                    } label: {
+                        Label {
+                            Text(AppLocalized("MT Bridge"))
+                        } icon: {
+                            Image(systemName: "waveform.path.ecg")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.white)
+                                .frame(width: 21, height: 21)
+                                .background(.orange, in: Circle())
+                        }
+                    }
+                    NavigationLink {
                         EnvironmentVariablesView()
                     } label: {
                         Label {

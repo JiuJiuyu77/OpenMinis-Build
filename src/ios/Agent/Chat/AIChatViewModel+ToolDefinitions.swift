@@ -261,6 +261,23 @@ extension AIChatViewModel {
         // [NativeBuild] 原生工具链编译（不经过 iSH）
         tools.append(NativeBuildTool.definition)
 
+        // [MT] Explicit bridge to the MT Memory Toolkit MCP server. The model
+        // must choose status/list_tools/call; no MT operation is automatic.
+        if MTBridgeClient.isEnabled {
+            tools.append(AgentToolDefinition(
+                name: "mt_tool",
+                description: "Connect to the MT Memory Toolkit MCP server for authorized live debugging. Use status first, list_tools to discover capabilities, then call with the exact server_tool and JSON arguments. Never guess addresses or write memory without explicit user intent.",
+                parameters: [
+                    "tool_title": AgentToolParam(type: .string, description: "A concise 5-10 word summary of this MT operation."),
+                    "action": AgentToolParam(type: .string, description: "MT operation to perform.", enumValues: ["status", "list_tools", "call"]),
+                    "server_tool": AgentToolParam(type: .string, description: "Exact MT MCP tool name, required for call."),
+                    "arguments": AgentToolParam(type: .string, description: "JSON object passed to the MT MCP tool; use {} when it takes no arguments.")
+                ],
+                required: ["tool_title", "action"],
+                propertyOrdering: ["tool_title", "action", "server_tool", "arguments"]
+            ))
+        }
+
         return tools
     }
 

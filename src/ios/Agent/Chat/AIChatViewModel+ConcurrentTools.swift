@@ -465,6 +465,16 @@ extension AIChatViewModel {
             let outcome = await NativeBuildTool.perform(args: toolArgs)
             toolOutput = outcome.text
             toolSuccess = outcome.ok
+        case "mt_tool":
+            let action = (toolArgs["action"] as? String)?.lowercased() ?? "status"
+            let serverTool = toolArgs["server_tool"] as? String
+            let argumentsJSON = toolArgs["arguments"] as? String
+            let outcome = await MTBridgeClient.shared.execute(action: action, tool: serverTool, argumentsJSON: argumentsJSON)
+            toolOutput = outcome.text
+            toolSuccess = outcome.ok
+            if msgIdx < messages.count, blockIdx < messages[msgIdx].blocks.count {
+                messages[msgIdx].blocks[blockIdx].content = toolOutput
+            }
         case "shell_execute":
             let (command, timeout, delay) = parseToolInput(from: argsJson)
 

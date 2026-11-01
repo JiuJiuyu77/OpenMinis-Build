@@ -262,15 +262,10 @@ final class DeveloperRuntimeManager: ObservableObject {
 
     // MARK: - Manifest
 
-    /// 故意**不安装**的 handler。
-    ///
-    /// 清单里的 `codex` 条目是另一套 App 的 AI 执行层（Codex CLI / app-server /
-    /// Code Mode Host）。Minis 有自己的 Agent 架构，不接管别人的 agent 运行时：
-    /// 这里只消费工具链类运行时（Theos / OLLVM / Node / Python / CoreTools /
-    /// ReverseTools），codex 条目在列表里连显示都不该出现，免得用户装一个
-    /// 与本 App 无关的 100MB deb。
-    /// Codex CLI 运行时包已被移除，Minis 使用自己的 AI 层方案。
-    static let unsupportedHandlers: Set<String> = ["codex"]
+    /// Runtime handlers are all installable. Codex is retained because MT-Agent
+    /// compatibility uses its CLI/app-server contract, while Minis keeps its
+    /// native Agent loop as the default UI path.
+    static let unsupportedHandlers: Set<String> = []
 
     /// 本 App 会展示与安装的运行时：清单顺序减去不采纳的 handler。
     var runtimes: [RuntimeDescriptor] {
@@ -967,9 +962,11 @@ final class DeveloperRuntimeManager: ObservableObject {
         // A truncated transfer (connection closed early) must not be mistaken
         // for a complete file: it would fail the SHA check anyway, but retrying
         // is far better than surfacing a checksum mismatch to the user.
-        if let expectedSize, expectedSize > 0, written < expectedSize {
+        if let expectedSize, expectedSize > 0, written != expectedSize {
             throw RuntimeInstallError.installFailed(
-                "Transfer ended early (\(written) of \(expectedSize) bytes)")
+                written < expectedSize
+                    ? "Transfer ended early (\(written) of \(expectedSize) bytes)"
+                    : "Transfer exceeded manifest size (\(written) of \(expectedSize) bytes)")
         }
 
         try? fm.removeItem(at: destination_(for: partial))

@@ -611,6 +611,8 @@
 		F1MCPDCRB /* MCPOAuthDiscovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1MCPDCR /* MCPOAuthDiscovery.swift */; };
 		F1MCPOAUTHB /* MCPOAuthController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1MCPOAUTH /* MCPOAuthController.swift */; };
 		F1MCPSTOREB /* MCPStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1MCPSTORE /* MCPStore.swift */; };
+		F1MTBRIDGEB /* MTBridgeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1MTBRIDGE /* MTBridgeClient.swift */; };
+		F1MTBRSETB /* MTBridgeSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1MTBRSET /* MTBridgeSettingsView.swift */; };
 		F1S00012 /* ChatSessionIdEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1S00011 /* ChatSessionIdEnvironment.swift */; };
 		F1T00011 /* ToolLiveSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1T00010 /* ToolLiveSheet.swift */; };
 		F1VMCPB1 /* MCPIntegrationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1VMCP01 /* MCPIntegrationsView.swift */; };
@@ -1454,6 +1456,8 @@
 		F1MCPDCR /* MCPOAuthDiscovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPOAuthDiscovery.swift; sourceTree = "<group>"; };
 		F1MCPOAUTH /* MCPOAuthController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPOAuthController.swift; sourceTree = "<group>"; };
 		F1MCPSTORE /* MCPStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPStore.swift; sourceTree = "<group>"; };
+		F1MTBRIDGE /* MTBridgeClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTBridgeClient.swift; sourceTree = "<group>"; };
+		F1MTBRSET /* MTBridgeSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTBridgeSettingsView.swift; sourceTree = "<group>"; };
 		F1S00011 /* ChatSessionIdEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSessionIdEnvironment.swift; sourceTree = "<group>"; };
 		F1T00010 /* ToolLiveSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolLiveSheet.swift; sourceTree = "<group>"; };
 		F1VMCP01 /* MCPIntegrationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCPIntegrationsView.swift; sourceTree = "<group>"; };
@@ -2529,6 +2533,7 @@
 				F1MCPSTORE /* MCPStore.swift */,
 				F1MCPOAUTH /* MCPOAuthController.swift */,
 				F1MCPDCR /* MCPOAuthDiscovery.swift */,
+				F1MTBRIDGE /* MTBridgeClient.swift */,
 				F1CPMODELS /* CopilotModelsAPI.swift */,
 				F1CPMGR /* CopilotOAuthManager.swift */,
 				F1CPCONST /* CopilotConstants.swift */,
@@ -2695,6 +2700,7 @@
 				E5TLS0011 /* ToolsSettingsView.swift */,
 				DRT000204 /* DeveloperRuntimeSettingsView.swift */,
 				DRT000412 /* RuntimeDiagnosticsView.swift */,
+				F1MTBRSET /* MTBridgeSettingsView.swift */,
 				E5LOCK102 /* FaceIDProtectionSettingsView.swift */,
 				E5LOCK103 /* AppLockOverlay.swift */,
 			);
@@ -3568,6 +3574,7 @@
 				E5Y000001 /* MathRenderScheduler.swift in Sources */,
 				E5N0000012F3B941A00049557 /* SkillStore.swift in Sources */,
 				F1MCPSTOREB /* MCPStore.swift in Sources */,
+				F1MTBRIDGEB /* MTBridgeClient.swift in Sources */,
 				F1MCPOAUTHB /* MCPOAuthController.swift in Sources */,
 				F1MCPDCRB /* MCPOAuthDiscovery.swift in Sources */,
 				F1CPMODELSB /* CopilotModelsAPI.swift in Sources */,
@@ -3656,6 +3663,7 @@
 				DRT000309 /* OpenAICapabilities.swift in Sources */,
 				DRT000310 /* RuntimeCapabilityNames.swift in Sources */,
 				DRT000312 /* RuntimeDiagnosticsView.swift in Sources */,
+				F1MTBRSETB /* MTBridgeSettingsView.swift in Sources */,
 				BKP000114 /* BackupDelivery.swift in Sources */,
 				BKP000130 /* BackupDestinations.swift in Sources */,
 				BKP000131 /* BackupActivityLock.swift in Sources */,

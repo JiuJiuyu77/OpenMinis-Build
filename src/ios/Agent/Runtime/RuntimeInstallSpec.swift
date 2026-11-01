@@ -28,6 +28,12 @@ struct RuntimeProbeSpec: Codable, Hashable {
         case executable, arguments, contains
     }
 
+    init(executable: String, arguments: [String], contains: String?) {
+        self.executable = executable
+        self.arguments = arguments
+        self.contains = contains
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         executable = try container.decode(String.self, forKey: .executable)
@@ -80,6 +86,27 @@ struct RuntimeInstallSpec: Codable, Hashable {
                                          signPaths: [],
                                          signPathsWithoutEntitlements: [])
 
+    /// The Codex deb is published without a portable install block. Its data
+    /// archive is rooted at var/jb, so validate the actual executable layout
+    /// instead of accepting a directory that merely unpacked successfully.
+    static let codex = RuntimeInstallSpec(
+        requiredPaths: [
+            "var/jb/usr/bin/codex",
+            "var/jb/usr/libexec/codex/codex",
+            "var/jb/usr/libexec/codex/codex-code-mode-host"
+        ],
+        pathEntries: ["var/jb/usr/bin", "var/jb/usr/libexec/codex"],
+        persistentPathEntries: [],
+        environment: [:],
+        probe: RuntimeProbeSpec(executable: "var/jb/usr/bin/codex",
+                                arguments: ["--version"], contains: "codex"),
+        signPaths: [
+            "var/jb/usr/bin/codex",
+            "var/jb/usr/libexec/codex/codex",
+            "var/jb/usr/libexec/codex/codex-code-mode-host"
+        ],
+        signPathsWithoutEntitlements: [])
+
     private init(requiredPaths: [String], pathEntries: [String], persistentPathEntries: [String],
                  environment: [String: String], probe: RuntimeProbeSpec?,
                  signPaths: [String], signPathsWithoutEntitlements: [String]) {
@@ -124,7 +151,11 @@ struct RuntimeInstallSpec: Codable, Hashable {
     /// `required_paths` 里当前缺失的项（顺序与清单一致）。
     func missingPaths(in root: URL) -> [String] {
         let fm = FileManager.default
-        return requiredPaths.filter { !fm.fileExists(atPath: root.appendingPathComponent($0).path) }
+        return requiredPaths.filter { relative in
+            guard !relative.hasPrefix("/"),
+                  !relative.split(separator: "/").contains("..") else { return true }
+            return !fm.fileExists(atPath: root.appendingPathComponent(relative).path)
+        }
     }
 }
 

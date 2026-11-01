@@ -125,8 +125,12 @@ struct RuntimeDescriptor: Codable, Identifiable, Hashable {
         case install
     }
 
-    /// 没有 `install` 块时返回空规格，调用方不必到处判断可选值。
-    var installSpecOrNone: RuntimeInstallSpec { install ?? .none }
+    /// 运行时清单没有 install 块时，仍为 Codex 提供内建契约；否则一份
+    /// 解包到错误目录的 deb 会被错误地记录为“已安装”。
+    var installSpecOrNone: RuntimeInstallSpec {
+        if let install { return install }
+        return handler == "codex" ? .codex : .none
+    }
 
     var downloadBytes: Int64 { downloadSize ?? 0 }
     var unpackedBytes: Int64 { unpackedSize ?? 0 }
@@ -257,7 +261,10 @@ enum RuntimeManifestLoader {
 
         for attempt in attempts(source: manifestURL, prefixes: mirrorPrefixes) {
             do {
-                let (payload, response) = try await URLSession.shared.data(from: attempt)
+                var request = URLRequest(url: attempt)
+                request.timeoutInterval = 90
+                request.setValue("Minis-Runtime/1", forHTTPHeaderField: "User-Agent")
+                let (payload, response) = try await URLSession.shared.data(for: request)
                 if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
                     throw LoadError.badStatus(http.statusCode)
                 }
@@ -323,13 +330,19 @@ enum RuntimeManifestLoader {
         if (try? JSONDecoder().decode(RuntimeManifest.self, from: data)) != nil {
             return data
         }
-        struct Envelope: Decodable { let content: String? }
+        struct Envelope: Decodable {
+            let content: String?
+            let encoding: String?
+        }
         guard let envelope = try? JSONDecoder().decode(Envelope.self, from: data),
-              let content = envelope.content,
-              let unwrapped = content.data(using: .utf8) else {
+              let content = envelope.content else {
             return data
         }
-        return unwrapped
+        if envelope.encoding?.lowercased() == "base64",
+           let decoded = Data(base64Encoded: content) {
+            return decoded
+        }
+        return content.data(using: .utf8) ?? data
     }
 
     private static func decode(_ data: Data) throws -> RuntimeManifest {
