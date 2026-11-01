@@ -9,6 +9,7 @@ import Foundation
 struct MTBridgeTool: Hashable, Sendable {
     let name: String
     let description: String?
+    let inputSchemaJSON: String?
 }
 
 enum MTBridgeError: LocalizedError, Sendable {
@@ -48,6 +49,7 @@ actor MTBridgeClient {
     private var requestID: Int = 0
     private var sessionID: String?
     private var initializedEndpoint: String?
+    private var protocolVersion = "2025-03-26"
     private var cachedTools: [MTBridgeTool] = []
 
     nonisolated static var isEnabled: Bool {
@@ -84,7 +86,15 @@ actor MTBridgeClient {
         let result = try await request(method: "tools/list", params: [:])
         let tools = (result["tools"] as? [[String: Any]] ?? []).compactMap { raw -> MTBridgeTool? in
             guard let name = raw["name"] as? String else { return nil }
-            return MTBridgeTool(name: name, description: raw["description"] as? String)
+            let schemaJSON: String? = {
+                guard let schema = raw["inputSchema"],
+                      JSONSerialization.isValidJSONObject(schema),
+                      let data = try? JSONSerialization.data(withJSONObject: schema, options: [.sortedKeys])
+                else { return nil }
+                return String(data: data, encoding: .utf8)
+            }()
+            return MTBridgeTool(name: name, description: raw["description"] as? String,
+                                inputSchemaJSON: schemaJSON)
         }
         cachedTools = tools
         return tools
@@ -109,10 +119,10 @@ actor MTBridgeClient {
             case "status":
                 let s = await status()
                 return (Self.render(["endpoint": s.endpoint, "connected": s.connected, "message": s.message,
-                                     "tools": s.tools.map { ["name": $0.name, "description": $0.description ?? ""] }]), s.connected)
+                                     "tools": s.tools.map { ["name": $0.name, "description": $0.description ?? "", "inputSchema": $0.inputSchemaJSON ?? "{}"] }]), s.connected)
             case "list_tools":
                 let tools = try await listTools()
-                return (Self.render(tools.map { ["name": $0.name, "description": $0.description ?? ""] }), true)
+                return (Self.render(tools.map { ["name": $0.name, "description": $0.description ?? "", "inputSchema": $0.inputSchemaJSON ?? "{}"] }), true)
             case "call":
                 guard let tool, !tool.isEmpty else { throw MTBridgeError.invalidArguments("call requires server_tool") }
                 let data = (argumentsJSON ?? "{}").data(using: .utf8) ?? Data("{}".utf8)
@@ -137,16 +147,27 @@ actor MTBridgeClient {
         }
         guard initializedEndpoint != endpoint else { return }
         requestID += 1
-        let result = try await rawRequest(id: requestID, method: "initialize", params: [
-            "protocolVersion": "2024-11-05",
-            "capabilities": [:],
-            "clientInfo": ["name": "Minis-MT", "version": "1.0"]
-        ])
-        if result["protocolVersion"] == nil && result["serverInfo"] == nil {
-            throw MTBridgeError.protocolError("initialize returned no server information")
+        let requestedVersions = ["2025-03-26", "2024-11-05"]
+        var lastError: Error?
+        for version in requestedVersions {
+            do {
+                let result = try await rawRequest(id: requestID, method: "initialize", params: [
+                    "protocolVersion": version,
+                    "capabilities": [:],
+                    "clientInfo": ["name": "OpenMinis", "version": "1.0"]
+                ])
+                if result["protocolVersion"] == nil && result["serverInfo"] == nil {
+                    throw MTBridgeError.protocolError("initialize returned no server information")
+                }
+                protocolVersion = (result["protocolVersion"] as? String) ?? version
+                initializedEndpoint = endpoint
+                _ = try? await rawNotification(method: "notifications/initialized", params: [:])
+                return
+            } catch {
+                lastError = error
+            }
         }
-        initializedEndpoint = endpoint
-        _ = try? await rawNotification(method: "notifications/initialized", params: [:])
+        throw lastError ?? MTBridgeError.protocolError("initialize failed")
     }
 
     private func request(method: String, params: [String: Any]) async throws -> [String: Any] {
@@ -169,6 +190,7 @@ actor MTBridgeClient {
         request.timeoutInterval = 45
         request.setValue("application/json, text/event-stream", forHTTPHeaderField: "Accept")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(protocolVersion, forHTTPHeaderField: "MCP-Protocol-Version")
         if let sessionID { request.setValue(sessionID, forHTTPHeaderField: "Mcp-Session-Id") }
         var body: [String: Any] = ["jsonrpc": "2.0", "method": method, "params": params]
         if let id { body["id"] = id }
